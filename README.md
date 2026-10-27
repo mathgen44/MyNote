@@ -54,36 +54,6 @@ MyNote (Rust)                          Navigateur                       Google
 
 Un utilisateur peut aussi utiliser **son propre identifiant OAuth** : ⚙ → Google Drive → *Avancé*. Tous ses appareils doivent alors utiliser le même, car `drive.file` limite l'accès aux fichiers créés par un même projet Google Cloud.
 
-### Mettre en place l'identifiant intégré (mainteneur, une seule fois)
-
-1. Sur [console.cloud.google.com](https://console.cloud.google.com), créez un projet et activez **Google Drive API** (API et services → Bibliothèque).
-2. **Google Auth Platform** : type *Externe*. Sous *Accès aux données*, ajoutez `https://www.googleapis.com/auth/drive.file`.
-3. **Identifiants → Créer des identifiants → ID client OAuth → Application de bureau**, puis **Télécharger le JSON**.
-4. Enregistrez ce fichier sous `src-tauri/google-oauth.json` (ignoré par git), ou définissez `MYNOTE_GOOGLE_CLIENT_ID` et `MYNOTE_GOOGLE_CLIENT_SECRET`. `src-tauri/build.rs` les intègre à l'exécutable à la compilation.
-5. `npm run tauri build`.
-
-Tant que l'application est en mode **Test** (Google Auth Platform → *Audience*), seuls les **utilisateurs test** déclarés peuvent se connecter, et leur connexion expire au bout de 7 jours.
-
-### Publier l'application auprès de Google (passage en production)
-
-Google exige trois pages publiques sur un domaine dont vous prouvez la propriété. Elles se trouvent dans [`docs/`](docs/) et sont publiées par GitHub Pages (*Settings → Pages*, branche `main`, dossier `/docs`) :
-
-| Page | Adresse |
-|---|---|
-| Accueil | https://mathgen44.github.io/MyNote/ |
-| Confidentialité | https://mathgen44.github.io/MyNote/privacy.html |
-| Conditions d'utilisation | https://mathgen44.github.io/MyNote/terms.html |
-
-Étapes, avec les pièges rencontrés :
-
-1. **Prouver la propriété du domaine entier**, pas seulement du sous-dossier. Le domaine autorisé est `mathgen44.github.io` : il faut donc un site à la racine. C'est le dépôt [`mathgen44.github.io`](https://github.com/mathgen44/mathgen44.github.io), qui porte la balise de vérification. Dans [Search Console](https://search.google.com/search-console), ajoutez la propriété `https://mathgen44.github.io/` (méthode « Balise HTML ») **avec le même compte Google** que le projet Cloud.
-2. **Google Auth Platform → Branding** :
-   - domaine autorisé : `mathgen44.github.io` ;
-   - page d'accueil : l'adresse **exacte**, sans ancre (pas de `#en`) ;
-   - liens de confidentialité et de conditions d'utilisation.
-3. **Logo** : facultatif. Google refuse un logo qui ressemble à une autre marque : l'ancienne icône, un carnet violet, a été refusée. En cas de doute, ne mettez pas de logo.
-4. **Audience → Publier l'application**. Après une modification de la vérification, Google demande d'attendre 24 h avant de revalider.
-
 ## Dossier synchronisé (alternative sans compte)
 
 MyNote écrit dans un dossier choisi, par exemple `G:\Mon Drive`, où il crée un sous-dossier `MyNote`. Un logiciel tiers se charge de la réplication : Google Drive pour ordinateur, OneDrive, Dropbox, Syncthing ou Nextcloud. Aucun compte n'est connecté dans MyNote. Il suffit de choisir le même dossier sur chaque PC.
