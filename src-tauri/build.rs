@@ -6,7 +6,11 @@
 // Sans l'un ou l'autre, l'utilisateur devra saisir son propre identifiant.
 
 fn main() {
-    println!("cargo:rerun-if-changed=google-oauth.json");
+    // Déclarer un fichier surveillé désactive la surveillance par défaut de
+    // Cargo : on liste donc tout ce dont dépend l'exécutable (icônes comprises).
+    for path in ["google-oauth.json", "icons", "tauri.conf.json", "capabilities", "src"] {
+        println!("cargo:rerun-if-changed={path}");
+    }
     println!("cargo:rerun-if-env-changed=MYNOTE_GOOGLE_CLIENT_ID");
     println!("cargo:rerun-if-env-changed=MYNOTE_GOOGLE_CLIENT_SECRET");
 
