@@ -8,7 +8,7 @@
 fn main() {
     // Déclarer un fichier surveillé désactive la surveillance par défaut de
     // Cargo : on liste donc tout ce dont dépend l'exécutable (icônes comprises).
-    for path in ["google-oauth.json", "icons", "tauri.conf.json", "capabilities", "src"] {
+    for path in ["google-oauth.json", "icons", "tauri.conf.json", "capabilities", "src", "../dist"] {
         println!("cargo:rerun-if-changed={path}");
     }
     println!("cargo:rerun-if-env-changed=MYNOTE_GOOGLE_CLIENT_ID");
