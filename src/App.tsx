@@ -3,6 +3,7 @@ import { Sidebar } from "./components/Sidebar";
 import { PageList } from "./components/PageList";
 import { PageView } from "./components/PageView";
 import { SettingsDialog, labelFor } from "./components/SettingsDialog";
+import type { SettingsTab } from "./components/SettingsDialog";
 import { DialogHost, MenuHost, askText } from "./components/overlays";
 import { createNotebook, createPage, getSnapshot, useWorkspace } from "./lib/store";
 import { startSync, useSyncStatus } from "./lib/sync";
@@ -41,7 +42,7 @@ export default function App() {
   const sync = useSyncStatus();
   const [selection, setSelection] = useState<Selection>(loadSelection);
   const [query, setQuery] = useState("");
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>();
   const searchRef = useRef<HTMLInputElement>(null);
 
   const sel = resolve(selection);
@@ -100,13 +101,13 @@ export default function App() {
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === "Escape" && setQuery("")}
         />
-        <button className={`sync-pill ${sync.state}`} title={sync.message ?? "Paramètres de synchronisation"} onClick={() => setSettingsOpen(true)}>
+        <button className={`sync-pill ${sync.state}`} title={sync.message ?? "Paramètres de synchronisation"} onClick={() => setSettingsTab("sync")}>
           <span className="dot" />
           {sync.state === "disconnected"
             ? "Synchro désactivée"
             : `${sync.mode === "folder" ? "Dossier" : "Drive"} · ${labelFor(sync.state)}`}
         </button>
-        <button className="icon-button" title="Paramètres" onClick={() => setSettingsOpen(true)}>
+        <button className="icon-button" title="Paramètres" onClick={() => setSettingsTab("appearance")}>
           ⚙
         </button>
       </header>
@@ -119,7 +120,7 @@ export default function App() {
             <button className="primary" onClick={firstNotebook}>
               Créer mon premier carnet
             </button>
-            <button onClick={() => setSettingsOpen(true)}>Configurer la synchronisation</button>
+            <button onClick={() => setSettingsTab("sync")}>Configurer la synchronisation</button>
           </div>
           <p className="hint">Vous avez déjà des notes synchronisées ? Activez la synchronisation : elles apparaîtront ici.</p>
         </div>
@@ -138,7 +139,7 @@ export default function App() {
         </div>
       )}
 
-      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
+      {settingsTab && <SettingsDialog tab={settingsTab} onClose={() => setSettingsTab(undefined)} />}
       <DialogHost />
       <MenuHost />
     </div>

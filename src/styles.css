@@ -13,29 +13,54 @@
   --ok: #2e7d32;
   --warn: #b26a00;
   --shadow: 0 8px 30px rgba(20, 10, 30, 0.18);
+  --topbar: var(--accent);
   --font: "Segoe UI", system-ui, -apple-system, sans-serif;
+  --note-font: var(--font);
+  --note-size: 15px;
   color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --accent: #5eead4;
-    --accent-soft: #17393d;
-    --bg: #1b1e20;
-    --bg-sidebar: #212528;
-    --bg-list: #24292b;
-    --bg-hover: #2d3437;
-    --bg-active: #2a4247;
-    --text: #ecebf0;
-    --text-muted: #9fabb0;
-    --border: #354043;
-    --danger: #ef6c6c;
-    --ok: #81c784;
-    --warn: #ffb74d;
-    --shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
-    color-scheme: dark;
-  }
+/* Thème : data-theme vaut toujours light ou dark (le choix « système » est
+   résolu par lib/appearance.ts). */
+:root[data-theme="dark"] {
+  --accent: #5eead4;
+  --accent-soft: #17393d;
+  --bg: #1b1e20;
+  --bg-sidebar: #212528;
+  --bg-list: #24292b;
+  --bg-hover: #2d3437;
+  --bg-active: #2a4247;
+  --text: #ecebf0;
+  --text-muted: #9fabb0;
+  --border: #354043;
+  --danger: #ef6c6c;
+  --ok: #81c784;
+  --warn: #ffb74d;
+  --shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  --topbar: #134e5a;
+  color-scheme: dark;
 }
+
+/* Couleurs d'accent (la sarcelle, par défaut, est définie ci-dessus). */
+:root[data-accent="blue"] { --accent: #1d4ed8; --accent-soft: #e3ebfd; --bg-active: #d4e0fb; }
+:root[data-accent="violet"] { --accent: #6d28d9; --accent-soft: #efe7fc; --bg-active: #e3d6fa; }
+:root[data-accent="green"] { --accent: #15803d; --accent-soft: #e3f4e8; --bg-active: #d2ecda; }
+:root[data-accent="orange"] { --accent: #c2410c; --accent-soft: #fdeee5; --bg-active: #fae0d1; }
+:root[data-accent="rose"] { --accent: #be185d; --accent-soft: #fce7f1; --bg-active: #f9d6e6; }
+:root[data-accent="graphite"] { --accent: #374151; --accent-soft: #eceef1; --bg-active: #dfe2e7; }
+:root[data-theme="dark"][data-accent="blue"] { --accent: #93b4fd; --accent-soft: #1c2a4a; --bg-active: #283a5e; --topbar: #1e3a8a; }
+:root[data-theme="dark"][data-accent="violet"] { --accent: #c4b5fd; --accent-soft: #2c2346; --bg-active: #3a2f5a; --topbar: #4c1d95; }
+:root[data-theme="dark"][data-accent="green"] { --accent: #86efac; --accent-soft: #17331f; --bg-active: #22442b; --topbar: #14532d; }
+:root[data-theme="dark"][data-accent="orange"] { --accent: #fdba74; --accent-soft: #3d2516; --bg-active: #4d301d; --topbar: #7c2d12; }
+:root[data-theme="dark"][data-accent="rose"] { --accent: #f9a8d4; --accent-soft: #3f1d2e; --bg-active: #50273b; --topbar: #831843; }
+:root[data-theme="dark"][data-accent="graphite"] { --accent: #d1d5db; --accent-soft: #2a2d31; --bg-active: #363a40; --topbar: #1f2937; }
+
+/* Police et taille du texte des notes. */
+:root[data-font="serif"] { --note-font: Georgia, Cambria, "Times New Roman", serif; }
+:root[data-font="mono"] { --note-font: Consolas, "Cascadia Mono", monospace; }
+:root[data-size="s"] { --note-size: 13px; }
+:root[data-size="l"] { --note-size: 17px; }
+:root[data-size="xl"] { --note-size: 19px; }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
@@ -69,12 +94,9 @@ code { background: var(--bg-hover); border-radius: 4px; padding: 1px 4px; font-s
 .app { display: flex; flex-direction: column; height: 100%; }
 .topbar {
   display: flex; align-items: center; gap: 12px; padding: 8px 14px;
-  background: var(--accent); color: #fff;
+  background: var(--topbar); color: #fff;
 }
-@media (prefers-color-scheme: dark) {
-  .topbar { background: #134e5a; }
-  button.primary, .badge { color: #0b2a2e; }
-}
+:root[data-theme="dark"] :is(button.primary, .badge) { color: #10181a; }
 .brand { font-weight: 600; font-size: 15px; letter-spacing: 0.3px; width: 200px; }
 .search {
   flex: 1; max-width: 460px; background: rgba(255, 255, 255, 0.92); color: #1f1f24; border: none;
@@ -151,7 +173,7 @@ code { background: var(--bg-hover); border-radius: 4px; padding: 1px 4px; font-s
 .highlight-icon { background: #fff59d; color: #1f1f24; padding: 0 3px; border-radius: 2px; }
 .editor-scroll { flex: 1; overflow-y: auto; }
 
-.note-content { outline: none; padding: 18px 48px 120px; max-width: 980px; min-height: 100%; font-size: 15px; }
+.note-content { outline: none; padding: 18px 48px 120px; max-width: 980px; min-height: 100%; font-family: var(--note-font); font-size: var(--note-size); }
 .note-content p.is-editor-empty:first-child::before {
   content: attr(data-placeholder); color: var(--text-muted); float: left; height: 0; pointer-events: none;
 }
@@ -191,14 +213,23 @@ code { background: var(--bg-hover); border-radius: 4px; padding: 1px 4px; font-s
 .toolbar-hint { color: var(--text-muted); font-size: 13px; min-height: 37px; padding-top: 8px; padding-bottom: 8px; }
 .canvas-scroll { flex: 1; overflow: auto; outline: none; position: relative; }
 .canvas-scroll.dragging { user-select: none; cursor: grabbing; }
-.canvas-surface {
-  position: relative; cursor: text;
+.canvas-surface { position: relative; cursor: text; }
+/* Fond des pages libres, au choix dans Paramètres › Apparence (uni par défaut). */
+:root[data-canvas-bg="dots"] .canvas-surface {
   background-image: radial-gradient(var(--border) 1px, transparent 1px); background-size: 24px 24px;
+}
+:root[data-canvas-bg="lines"] .canvas-surface {
+  background-image: linear-gradient(transparent 27px, var(--border) 27px); background-size: 100% 28px;
+}
+:root[data-canvas-bg="grid"] .canvas-surface {
+  background-image: linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 24px 24px;
 }
 .canvas-block { position: absolute; border: 1px solid transparent; border-radius: 4px; cursor: auto; }
 .canvas-block:hover { border-color: var(--border); }
 .canvas-block.active { border-color: var(--accent); }
-.canvas-block.text { background: var(--bg); }
+/* Transparent pour laisser voir le fond (lignes…), opaque pendant l'édition. */
+.canvas-block.text.active { background: var(--bg); }
 .block-bar {
   position: absolute; left: -1px; right: -1px; top: -15px; height: 14px; cursor: move;
   background: var(--bg-hover); border: 1px solid var(--border); border-bottom: none; border-radius: 4px 4px 0 0;
@@ -209,7 +240,7 @@ code { background: var(--bg-hover); border-radius: 4px; padding: 1px 4px; font-s
 .block-remove { background: none; border: none; padding: 0 6px; line-height: 12px; font-size: 13px; color: var(--text-muted); }
 .block-remove:hover:not(:disabled) { background: none; color: var(--danger); }
 .block-resize { position: absolute; top: 0; right: -4px; width: 8px; height: 100%; cursor: ew-resize; }
-.canvas-block .note-content { padding: 4px 10px; min-height: 0; max-width: none; font-size: 15px; }
+.canvas-block .note-content { padding: 4px 10px; min-height: 0; max-width: none; }
 .canvas-block .note-content > :first-child { margin-top: 0; }
 .canvas-block .note-content > :last-child { margin-bottom: 0; }
 .canvas-block.image img { display: block; width: 100%; height: auto; border-radius: 3px; cursor: move; user-select: none; }
@@ -247,6 +278,20 @@ code { background: var(--bg-hover); border-radius: 4px; padding: 1px 4px; font-s
 .settings .mode-option.selected { border-color: var(--accent); background: var(--accent-soft); }
 .modal .mode-option input { width: auto; flex: none; margin-top: 4px; accent-color: var(--accent); }
 .badge { margin-left: 8px; font-size: 11px; background: var(--accent); color: #fff; border-radius: 999px; padding: 1px 8px; }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: -4px 0 4px; }
+.tabs button { background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 6px 12px; font-weight: 600; color: var(--text-muted); }
+.tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
+.tabs button:hover:not(:disabled) { background: none; color: var(--text); }
+.appearance { display: flex; flex-direction: column; gap: 14px; }
+.appearance .setting { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+.segmented button { border: none; border-radius: 0; background: var(--bg); padding: 4px 11px; font-size: 13px; }
+.segmented button + button { border-left: 1px solid var(--border); }
+.segmented button.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.swatches { display: flex; gap: 8px; }
+.swatch { width: 24px; height: 24px; border-radius: 50%; padding: 0; border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--border); }
+.swatch.active { box-shadow: 0 0 0 2px var(--text); }
+.swatch:hover:not(:disabled) { filter: brightness(1.15); }
 
 .context-menu {
   position: fixed; z-index: 60; min-width: 200px; background: var(--bg); border: 1px solid var(--border);
