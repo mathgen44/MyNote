@@ -93,6 +93,11 @@ export function openMenu(e: ReactMouseEvent, items: MenuItem[]) {
   showMenu({ x: e.clientX, y: e.clientY, items });
 }
 
+/** Ouvre le menu à une position de la fenêtre (hors événement React). */
+export function openMenuAt(x: number, y: number, items: MenuItem[]) {
+  showMenu({ x, y, items });
+}
+
 export function MenuHost() {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const ref = useRef<HTMLDivElement>(null);

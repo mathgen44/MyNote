@@ -54,3 +54,8 @@ export async function saveFile(name: string, data: Blob | string): Promise<boole
   const bytes = new Uint8Array(await blob.arrayBuffer());
   return invoke<boolean>("save_file", { name, data: Array.from(bytes) });
 }
+
+/** Ouvre un fichier avec l'application associée de Windows. */
+export async function openFile(id: string, name: string, data: Blob): Promise<void> {
+  await invoke("open_file", new Uint8Array(await data.arrayBuffer()), { headers: { "x-id": id, "x-name": encodeURIComponent(name) } });
+}

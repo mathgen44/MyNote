@@ -8,10 +8,12 @@ import { EditorContent } from "@tiptap/react";
 import type { Editor } from "@tiptap/react";
 import * as Y from "yjs";
 import { ATTACHMENT_PREFIX, attachmentAdded, attachmentUrl, saveAttachment } from "../lib/attachments";
-import { insertFiles } from "../lib/extensions";
+import { chooseInsertMode, downloadAttachment, insertFiles, openAttachment } from "../lib/extensions";
+import type { InsertMode } from "../lib/extensions";
 import { useNoteEditor } from "../lib/noteEditor";
 import { addBlock, blockField, blocksOf, bringToFront, readBlocks, removeBlock, updateBlock } from "../lib/pageDoc";
 import type { Block } from "../lib/pageDoc";
+import { openMenu } from "./overlays";
 import { Toolbar } from "./Toolbar";
 
 const TEXT_WIDTH = 420;
@@ -44,7 +46,7 @@ export function CanvasView({ doc }: { doc: Y.Doc }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const editors = useRef(new Map<string, Editor>());
-  const pendingFiles = useRef(new Map<string, File[]>());
+  const pendingFiles = useRef(new Map<string, { files: File[]; mode: InsertMode }>());
   const focusOnCreate = useRef<string>();
   // Dernière position de la souris sur la page : là où l'on colle une image.
   const pointer = useRef<{ x: number; y: number }>();
@@ -95,23 +97,25 @@ export function CanvasView({ doc }: { doc: Y.Doc }) {
     return { x: Math.max(0, Math.round(e.clientX - rect.left)), y: Math.max(0, Math.round(e.clientY - rect.top)) };
   };
 
-  const createTextBlock = (x: number, y: number, files?: File[]) => {
+  const createTextBlock = (x: number, y: number, files?: File[], mode: InsertMode = "link") => {
     const id = addBlock(doc, { type: "text", x, y, w: TEXT_WIDTH });
     focusOnCreate.current = id;
-    if (files?.length) pendingFiles.current.set(id, files);
+    if (files?.length) pendingFiles.current.set(id, { files, mode });
     removeIfEmpty(activeId);
     setActiveId(id);
     return id;
   };
 
-  const addFiles = async (files: File[], x: number, y: number) => {
-    const images = files.filter((f) => f.type.startsWith("image/"));
-    const others = files.filter((f) => !f.type.startsWith("image/"));
+  /** Avec aperçu, les images deviennent des blocs ; le reste va dans un bloc de texte. */
+  const addFiles = async (files: File[], x: number, y: number, mode: InsertMode) => {
+    const images = mode === "preview" ? files.filter((f) => f.type.startsWith("image/")) : [];
+    const others = files.filter((f) => !images.includes(f));
     for (const [i, file] of images.entries()) {
       const id = await saveAttachment(file);
-      addBlock(doc, { type: "image", x: x + i * 24, y: y + i * 24, w: await imageWidth(file), src: ATTACHMENT_PREFIX + id });
+      const w = await imageWidth(file);
+      addBlock(doc, { type: "image", x: x + i * 24, y: y + i * 24, w, src: ATTACHMENT_PREFIX + id, name: file.name });
     }
-    if (others.length) createTextBlock(x, y + images.length * 24, others);
+    if (others.length) createTextBlock(x, y + images.length * 24, others, mode);
   };
 
   // --- Souris : création, déplacement, redimensionnement -----------------------
@@ -187,7 +191,8 @@ export function CanvasView({ doc }: { doc: Y.Doc }) {
     if (!files.length) return;
     e.preventDefault();
     const { x, y } = pasteOrigin();
-    void addFiles(files, x, y);
+    const rect = surfaceRef.current!.getBoundingClientRect();
+    void chooseInsertMode(files, rect.left + x, rect.top + y, true).then((mode) => addFiles(files, x, y, mode));
   };
 
   const onDrop = (e: DragEvent) => {
@@ -196,7 +201,7 @@ export function CanvasView({ doc }: { doc: Y.Doc }) {
     if (!files.length) return;
     e.preventDefault();
     const { x, y } = pagePoint(e);
-    void addFiles(files, x, y);
+    void chooseInsertMode(files, e.clientX, e.clientY, false).then((mode) => addFiles(files, x, y, mode));
   };
 
   // --- Rendu -----------------------------------------------------------------------
@@ -210,7 +215,7 @@ export function CanvasView({ doc }: { doc: Y.Doc }) {
       {activeEditor ? (
         <Toolbar editor={activeEditor} />
       ) : (
-        <div className="toolbar toolbar-hint">Cliquez n'importe où pour écrire · collez ou déposez une image sur la page</div>
+        <div className="toolbar toolbar-hint">Cliquez n'importe où pour écrire · collez ou déposez des images et des fichiers sur la page</div>
       )}
       <div
         ref={scrollRef}
@@ -243,10 +248,10 @@ export function CanvasView({ doc }: { doc: Y.Doc }) {
                 if (editor) editors.current.set(block.id, editor);
                 else editors.current.delete(block.id);
                 if (!editor) return;
-                const files = pendingFiles.current.get(block.id);
-                if (files) {
+                const pending = pendingFiles.current.get(block.id);
+                if (pending) {
                   pendingFiles.current.delete(block.id);
-                  void insertFiles(editor.view, files);
+                  void insertFiles(editor.view, pending.files, undefined, pending.mode);
                 }
                 if (focusOnCreate.current === block.id) {
                   focusOnCreate.current = undefined;
@@ -309,7 +314,7 @@ function CanvasBlock({ doc, block, active, onActivate, onStartDrag, onRemove, on
       {block.type === "text" ? (
         <TextBlock doc={doc} id={block.id} onEditor={onEditor} onFocus={onEditorFocus} />
       ) : (
-        <ImageBlock src={block.src ?? ""} onPointerDown={(e) => onStartDrag(e, "move")} onClick={onActivate} />
+        <ImageBlock src={block.src ?? ""} name={block.name} onPointerDown={(e) => onStartDrag(e, "move")} onClick={onActivate} />
       )}
       <div className="block-resize" title="Largeur" onPointerDown={(e) => onStartDrag(e, "resize")} />
     </div>
@@ -331,7 +336,14 @@ function TextBlock(props: { doc: Y.Doc; id: string; onEditor: (e: Editor | undef
   return <EditorContent editor={editor} />;
 }
 
-function ImageBlock({ src, onPointerDown, onClick }: { src: string; onPointerDown: (e: ReactPointerEvent) => void; onClick: () => void }) {
+interface ImageProps {
+  src: string;
+  name?: string;
+  onPointerDown: (e: ReactPointerEvent) => void;
+  onClick: () => void;
+}
+
+function ImageBlock({ src, name = "image.png", onPointerDown, onClick }: ImageProps) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     if (!src.startsWith(ATTACHMENT_PREFIX)) {
@@ -349,8 +361,23 @@ function ImageBlock({ src, onPointerDown, onClick }: { src: string; onPointerDow
       off();
     };
   }, [src]);
+  const id = src.startsWith(ATTACHMENT_PREFIX) ? src.slice(ATTACHMENT_PREFIX.length) : undefined;
   return url ? (
-    <img src={url} alt="" draggable={false} onPointerDown={onPointerDown} onClick={onClick} />
+    <img
+      src={url}
+      alt=""
+      draggable={false}
+      onPointerDown={onPointerDown}
+      onClick={onClick}
+      onDoubleClick={() => id && void openAttachment(id, name)}
+      onContextMenu={(e) =>
+        id &&
+        openMenu(e, [
+          { label: "Ouvrir", action: () => void openAttachment(id, name) },
+          { label: "Enregistrer sous…", action: () => void downloadAttachment(id, name) },
+        ])
+      }
+    />
   ) : (
     <div className="image-pending" onPointerDown={onPointerDown}>
       Image en cours de synchronisation…

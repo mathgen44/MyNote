@@ -21,7 +21,8 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { yXmlFragmentToProseMirrorRootNode } from "y-prosemirror";
 import type * as Y from "yjs";
-import { AttachmentImage, FileAttachment, downloadAttachment, insertFiles } from "./extensions";
+import { ATTACHMENT_PREFIX } from "./attachments";
+import { AttachmentImage, FileAttachment, FilePreview, attachmentMenu, chooseInsertMode, insertFiles, openAttachment } from "./extensions";
 
 /** Extensions qui définissent le contenu (schéma) d'une note. */
 function contentExtensions(): Extensions {
@@ -39,6 +40,7 @@ function contentExtensions(): Extensions {
     Link.configure({ openOnClick: false, autolink: true }),
     AttachmentImage.configure({ allowBase64: true }),
     FileAttachment,
+    FilePreview,
   ];
 }
 
@@ -73,19 +75,21 @@ export function useNoteEditor(doc: Y.Doc, field: string, opts: Options = {}) {
       handlePaste(view, event) {
         const files = Array.from(event.clipboardData?.files ?? []);
         if (!files.length) return false;
-        void insertFiles(view, files);
+        const pos = view.state.selection.from;
+        const { left, bottom } = view.coordsAtPos(pos);
+        void chooseInsertMode(files, left, bottom, true).then((mode) => insertFiles(view, files, pos, mode));
         return true;
       },
       handleDrop(view, event) {
         const files = Array.from(event.dataTransfer?.files ?? []);
         if (!files.length) return false;
         const pos = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos;
-        void insertFiles(view, files, pos);
+        void chooseInsertMode(files, event.clientX, event.clientY, false).then((mode) => insertFiles(view, files, pos, mode));
         return true;
       },
       handleClickOn(_view, _pos, node, _nodePos, event) {
         if (node.type.name === "fileAttachment") {
-          void downloadAttachment(node.attrs.id, node.attrs.name);
+          void openAttachment(node.attrs.id, node.attrs.name);
           return true;
         }
         // Ctrl+clic sur un lien : ouverture dans le navigateur.
@@ -95,6 +99,27 @@ export function useNoteEditor(doc: Y.Doc, field: string, opts: Options = {}) {
           return true;
         }
         return false;
+      },
+      handleDoubleClickOn(_view, _pos, node) {
+        const src = String(node.attrs.src ?? "");
+        if (node.type.name !== "image" || !src.startsWith(ATTACHMENT_PREFIX)) return false;
+        void openAttachment(src.slice(ATTACHMENT_PREFIX.length), node.attrs.alt || "image.png");
+        return true;
+      },
+      handleDOMEvents: {
+        // Clic droit sur une pièce jointe : ouvrir, lien / aperçu, enregistrer.
+        contextmenu(view, event) {
+          const target = event.target as HTMLElement;
+          const el = target.closest(".file-chip, .file-preview, img");
+          if (!el || !view.dom.contains(el)) return false;
+          // Selon le nœud, la position trouvée est sur lui ou juste après son début.
+          const inside = view.posAtCoords({ left: event.clientX, top: event.clientY })?.inside ?? -1;
+          const atDom = view.posAtDOM(el, 0);
+          const found = [inside, atDom, atDom - 1].some((pos) => pos >= 0 && attachmentMenu(view, pos, event.clientX, event.clientY));
+          if (!found) return false;
+          event.preventDefault();
+          return true;
+        },
       },
     },
     onCreate: ({ editor }) => opts.onCreate?.(editor as Editor),

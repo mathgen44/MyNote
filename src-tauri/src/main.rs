@@ -18,6 +18,7 @@ fn main() {
             google::google_access_token,
             google::google_logout,
             files::save_file,
+            files::open_file,
             folder::sync_settings,
             folder::sync_set_mode,
             folder::folder_pick,

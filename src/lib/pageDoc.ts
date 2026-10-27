@@ -27,6 +27,8 @@ export interface Block {
   z: number;
   /** Image : `attachment:<id>`. */
   src?: string;
+  /** Image : nom du fichier d'origine (ouverture, enregistrement). */
+  name?: string;
 }
 
 export const blockField = (id: string) => `block-${id}`;
@@ -101,6 +103,7 @@ export function convertToFlow(doc: Y.Doc) {
       } else if (block.src) {
         const image = new Y.XmlElement("image");
         image.setAttribute("src", block.src);
+        if (block.name) image.setAttribute("alt", block.name);
         content.push([image]);
       }
       removeBlock(doc, block.id);

@@ -18,4 +18,5 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 rand = "0.8"
 sha2 = "0.10"
 base64 = "0.22"
+percent-encoding = "2"
 keyring = { version = "3", features = ["windows-native"] }
