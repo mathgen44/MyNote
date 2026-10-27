@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { Editor } from "@tiptap/react";
 import { insertFiles } from "../lib/extensions";
@@ -26,6 +26,13 @@ function Btn(props: { title: string; active?: boolean; disabled?: boolean; onCli
 
 export function Toolbar({ editor }: { editor: Editor }) {
   const fileInput = useRef<HTMLInputElement>(null);
+  // Suit la sélection de l'éditeur même quand il appartient à un autre composant (canvas).
+  const [, refresh] = useState(0);
+  useEffect(() => {
+    const onChange = () => refresh((n) => n + 1);
+    editor.on("transaction", onChange);
+    return () => void editor.off("transaction", onChange);
+  }, [editor]);
   const chain = () => editor.chain().focus();
   const inTable = editor.isActive("table");
 

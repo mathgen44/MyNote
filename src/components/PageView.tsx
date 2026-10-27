@@ -1,27 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import type { Editor as TiptapEditor } from "@tiptap/react";
-import TurndownService from "turndown";
 import type * as Y from "yjs";
-import { ATTACHMENT_PREFIX, blobToDataUrl, getAttachment } from "../lib/attachments";
+import { pageToHtml, pageToMarkdown } from "../lib/exportPage";
+import { convertToCanvas, convertToFlow } from "../lib/pageDoc";
 import { saveFile } from "../lib/platform";
 import { getPageDoc, update, useWorkspace } from "../lib/store";
+import { CanvasView } from "./CanvasView";
 import { Editor } from "./Editor";
-import { openMenu } from "./overlays";
+import { confirmAction, openMenu } from "./overlays";
 
 const dateFmt = new Intl.DateTimeFormat("fr-FR", { dateStyle: "full", timeStyle: "short" });
-
-/** HTML de la page avec les images intégrées (export autonome). */
-async function exportHtml(editor: TiptapEditor): Promise<string> {
-  const container = document.createElement("div");
-  container.innerHTML = editor.getHTML();
-  for (const img of Array.from(container.querySelectorAll("img"))) {
-    const src = img.getAttribute("src") ?? "";
-    if (!src.startsWith(ATTACHMENT_PREFIX)) continue;
-    const blob = await getAttachment(src.slice(ATTACHMENT_PREFIX.length));
-    if (blob) img.src = await blobToDataUrl(blob);
-  }
-  return container.innerHTML;
-}
 
 const safeName = (title: string) => (title.trim() || "page").replace(/[\\/:*?"<>|]/g, "_").slice(0, 80);
 
@@ -50,22 +38,34 @@ export function PageView({ pageId }: { pageId?: string }) {
     );
   }
 
+  const layout = page.layout ?? "flow";
+  const title = page.title || "Sans titre";
+
   const exportAs = async (format: "html" | "md") => {
-    const editor = editorRef.current;
-    if (!editor) return;
-    const body = await exportHtml(editor);
-    const title = page.title || "Sans titre";
-    if (format === "html") {
-      const html = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>${title}</title></head><body><h1>${title}</h1>${body}</body></html>`;
-      await saveFile(`${safeName(title)}.html`, html);
-    } else {
-      const md = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced" }).turndown(body);
-      await saveFile(`${safeName(title)}.md`, `# ${title}\n\n${md}\n`);
+    if (!doc) return;
+    if (format === "html") await saveFile(`${safeName(title)}.html`, await pageToHtml(doc, layout, title));
+    else await saveFile(`${safeName(title)}.md`, await pageToMarkdown(doc, layout, title));
+  };
+
+  const switchLayout = async () => {
+    if (!doc) return;
+    if (layout === "flow") {
+      convertToCanvas(doc);
+      update("pages", page.id, { layout: "canvas" });
+      return;
     }
+    const ok = await confirmAction(
+      "Convertir en page en flux",
+      "Les blocs seront mis les uns sous les autres, de haut en bas : leur disposition sera perdue.",
+      "Convertir",
+    );
+    if (!ok) return;
+    convertToFlow(doc);
+    update("pages", page.id, { layout: "flow" });
   };
 
   return (
-    <main className="page-view">
+    <main className={"page-view" + (layout === "canvas" ? " canvas" : "")}>
       <div className="page-header">
         <input
           className="page-title-input"
@@ -73,7 +73,7 @@ export function PageView({ pageId }: { pageId?: string }) {
           placeholder="Titre de la page"
           onChange={(e) => update("pages", page.id, { title: e.target.value })}
           onKeyDown={(e) => {
-            if (e.key === "Enter") {
+            if (e.key === "Enter" && layout === "flow") {
               e.preventDefault();
               editorRef.current?.commands.focus("start");
             }
@@ -81,9 +81,11 @@ export function PageView({ pageId }: { pageId?: string }) {
         />
         <button
           className="icon-button"
-          title="Exporter"
+          title="Plus d'actions"
           onClick={(e) =>
             openMenu(e, [
+              { label: layout === "flow" ? "Convertir en page libre (canvas)" : "Convertir en page en flux", action: () => void switchLayout() },
+              "separator",
               { label: "Exporter en HTML", action: () => void exportAs("html") },
               { label: "Exporter en Markdown", action: () => void exportAs("md") },
               { label: "Imprimer / PDF", action: () => window.print() },
@@ -94,7 +96,12 @@ export function PageView({ pageId }: { pageId?: string }) {
         </button>
       </div>
       <div className="page-meta">{dateFmt.format(page.created)}</div>
-      {doc && <Editor key={page.id} doc={doc} onReady={(ed) => (editorRef.current = ed)} />}
+      {doc &&
+        (layout === "canvas" ? (
+          <CanvasView key={page.id} doc={doc} />
+        ) : (
+          <Editor key={page.id} doc={doc} onReady={(ed) => (editorRef.current = ed)} />
+        ))}
     </main>
   );
 }

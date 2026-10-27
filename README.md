@@ -15,6 +15,7 @@ Une nouvelle version s'installe par-dessus l'ancienne. Les notes et la connexion
 ## Fonctionnalités
 
 - **Carnets → sections → pages** avec sous-pages (deux niveaux de retrait), couleurs et menus contextuels (clic droit)
+- **Pages libres (canvas)**, comme dans OneNote : cliquez n'importe où pour écrire. Les blocs de texte et les images se déplacent et se redimensionnent librement. Une page peut passer du mode flux au mode libre et inversement (menu ⋯)
 - **Éditeur riche** : titres, gras/italique/souligné/barré, surlignage multicolore, listes, **listes de tâches**, citations, code, tableaux, liens, séparateurs
 - **Images et pièces jointes** : coller, glisser-déposer ou bouton 📎. Les grandes images sont réduites automatiquement
 - **Glisser-déposer** de pages (réordonner, ou déposer sur une autre section pour la déplacer)
@@ -103,6 +104,9 @@ npm run test:sync
 ```
 src/
   lib/store.ts        modèle Yjs (workspace + une doc par page), persistance IndexedDB
+  lib/pageDoc.ts      contenu d'une page : flux ou blocs du canvas, conversion
+  lib/noteEditor.ts   configuration TipTap commune (flux et blocs)
+  lib/exportPage.ts   export HTML / Markdown
   lib/sync.ts         moteur de synchro (Google Drive API v3 ou dossier local)
   lib/search.ts       index plein texte (MiniSearch)
   lib/attachments.ts  pièces jointes (Blob IndexedDB)
@@ -121,7 +125,7 @@ tests/sync/           simulation multi-appareils du moteur de synchro
 ## Limites connues / pistes
 
 - Pas encore de corbeille visible (les suppressions sont logiques et synchronisées)
-- Pas de canvas libre façon OneNote (éditeur en flux) : prévu pour la prochaine version
-- Pas d'écriture au stylet, d'OCR, d'audio ni d'import OneNote (API Microsoft Graph)
+- Pages libres : pas encore de stylet, de zoom ni de sélection multiple (prévus pour la v0.3)
+- Pas d'OCR, d'audio ni d'import OneNote (API Microsoft Graph)
 - Le fichier d'une page sur Drive n'est pas lisible directement (format binaire Yjs) : utiliser l'export
 - PWA : il faudra un mini-backend pour les jetons Google (une application web pure n'obtient pas de jeton de renouvellement)

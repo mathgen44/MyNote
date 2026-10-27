@@ -2,7 +2,8 @@
 
 import MiniSearch from "minisearch";
 import { useSyncExternalStore } from "react";
-import { emitter, getPageDoc, getSnapshot, pageContentChange, pageText, workspace, workspaceReady } from "./store";
+import { pageText } from "./pageDoc";
+import { emitter, getPageDoc, getSnapshot, pageContentChange, workspace, workspaceReady } from "./store";
 
 interface Entry {
   id: string;

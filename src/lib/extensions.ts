@@ -6,8 +6,26 @@ import type { EditorView } from "@tiptap/pm/view";
 import { ATTACHMENT_PREFIX, attachmentAdded, attachmentUrl, getAttachment, saveAttachment } from "./attachments";
 import { saveFile } from "./platform";
 
+export const ATTACHMENT_SRC = "data-attachment-src";
+
 /** Image dont la source `attachment:<id>` est résolue depuis IndexedDB. */
 export const AttachmentImage = Image.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      // En HTML (rendu initial, copier-coller, export), la référence locale va
+      // dans data-attachment-src : le navigateur n'essaie pas de la charger.
+      src: {
+        default: null,
+        parseHTML: (el) => el.getAttribute(ATTACHMENT_SRC) ?? el.getAttribute("src"),
+        renderHTML: (attrs) =>
+          String(attrs.src ?? "").startsWith(ATTACHMENT_PREFIX) ? { [ATTACHMENT_SRC]: attrs.src } : { src: attrs.src },
+      },
+    };
+  },
+  parseHTML() {
+    return [{ tag: `img[${ATTACHMENT_SRC}]` }, ...(this.parent?.() ?? [])];
+  },
   addNodeView() {
     return ({ node }) => {
       const img = document.createElement("img");

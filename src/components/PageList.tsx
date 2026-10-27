@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { createPage, movePage, remove, update, useWorkspace } from "../lib/store";
 import { search, useIndexVersion } from "../lib/search";
+import type { Layout } from "../lib/pageDoc";
 import { confirmAction, openMenu } from "./overlays";
 
 interface Props {
@@ -45,13 +46,22 @@ export function PageList({ sectionId, pageId, query, onSelectPage }: Props) {
   if (!section) return <aside className="page-list" />;
   const pages = allPages.filter((p) => p.sectionId === section.id);
 
-  const add = (opts?: { afterId?: string; level?: number }) => onSelectPage(createPage(section.id, opts));
+  const add = (opts?: { afterId?: string; level?: number; layout?: Layout }) => onSelectPage(createPage(section.id, opts));
 
   return (
     <aside className="page-list" style={{ ["--section-color" as string]: section.color }}>
       <div className="page-list-header">
         <span>{section.name}</span>
-        <button className="icon-button" title="Ajouter une page (Ctrl+N)" onClick={() => add()}>
+        <button
+          className="icon-button"
+          title="Ajouter une page"
+          onClick={(e) =>
+            openMenu(e, [
+              { label: "Page (Ctrl+N)", action: () => add() },
+              { label: "Page libre (canvas)", action: () => add({ layout: "canvas" }) },
+            ])
+          }
+        >
           +
         </button>
       </div>
@@ -85,8 +95,8 @@ export function PageList({ sectionId, pageId, query, onSelectPage }: Props) {
             }}
             onContextMenu={(e) =>
               openMenu(e, [
-                { label: "Nouvelle page en dessous", action: () => add({ afterId: p.id, level: p.level }) },
-                { label: "Nouvelle sous-page", action: () => add({ afterId: p.id, level: Math.min(2, p.level + 1) }) },
+                { label: "Nouvelle page en dessous", action: () => add({ afterId: p.id, level: p.level, layout: p.layout }) },
+                { label: "Nouvelle sous-page", action: () => add({ afterId: p.id, level: Math.min(2, p.level + 1), layout: p.layout }) },
                 "separator",
                 { label: "Augmenter le retrait", disabled: p.level >= 2, action: () => update("pages", p.id, { level: p.level + 1 }) },
                 { label: "Diminuer le retrait", disabled: p.level <= 0, action: () => update("pages", p.id, { level: p.level - 1 }) },
@@ -102,7 +112,10 @@ export function PageList({ sectionId, pageId, query, onSelectPage }: Props) {
             }
           >
             <div className="page-title">{p.title || "Sans titre"}</div>
-            <div className="page-date">{dateFmt.format(p.updated)}</div>
+            <div className="page-date">
+              {dateFmt.format(p.updated)}
+              {p.layout === "canvas" && " · page libre"}
+            </div>
           </div>
         ))}
         {pages.length === 0 && (

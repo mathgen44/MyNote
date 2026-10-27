@@ -10,9 +10,9 @@ import { useSyncExternalStore } from "react";
 import * as Y from "yjs";
 import { IndexeddbPersistence } from "y-indexeddb";
 import { newId } from "./ids";
+import type { Layout } from "./pageDoc";
 
 export const REMOTE_ORIGIN = "mynote-remote";
-export const CONTENT_FIELD = "content";
 
 export type Kind = "notebooks" | "sections" | "pages";
 
@@ -34,6 +34,7 @@ export interface Page extends Base {
   sectionId: string;
   title: string;
   level: number; // 0 = page, 1-2 = sous-page (comme OneNote)
+  layout?: Layout; // absent = flux (pages créées avant le canvas)
   created: number;
   updated: number;
 }
@@ -171,7 +172,7 @@ export function sectionPages(sectionId: string): Page[] {
 }
 
 /** Crée une page, éventuellement juste après `afterId` (sous-page si `level` > 0). */
-export function createPage(sectionId: string, opts: { afterId?: string; level?: number } = {}): string {
+export function createPage(sectionId: string, opts: { afterId?: string; level?: number; layout?: Layout } = {}): string {
   const pages = sectionPages(sectionId);
   const idx = pages.findIndex((p) => p.id === opts.afterId);
   let order = nextOrder(pages);
@@ -183,7 +184,7 @@ export function createPage(sectionId: string, opts: { afterId?: string; level?: 
     order = next ? (pages[end].order + next.order) / 2 : pages[end].order + 1;
   }
   const now = Date.now();
-  return insert("pages", { sectionId, title: "", level: opts.level ?? 0, order, created: now, updated: now });
+  return insert("pages", { sectionId, title: "", level: opts.level ?? 0, layout: opts.layout ?? "flow", order, created: now, updated: now });
 }
 
 /** Déplace une page avant `beforeId` (ou en fin de section). */
@@ -231,14 +232,4 @@ export function getPageDoc(id: string): PageEntry {
     );
   });
   return entry;
-}
-
-/** Texte brut d'une page (pour la recherche). */
-export function pageText(doc: Y.Doc): string {
-  return doc
-    .getXmlFragment(CONTENT_FIELD)
-    .toString()
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
 }
