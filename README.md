@@ -61,6 +61,20 @@ L'identifiant OAuth Google est intégré à l'exécutable au moment de la compil
 5. Enregistrez ce fichier sous `src-tauri/google-oauth.json`. Il est ignoré par git. Vous pouvez aussi définir les variables d'environnement `MYNOTE_GOOGLE_CLIENT_ID` et `MYNOTE_GOOGLE_CLIENT_SECRET`.
 6. `npm run tauri build` : l'identifiant est intégré à l'exécutable.
 
+#### Pages exigées par Google pour la publication
+
+Le dossier [`docs/`](docs/) contient le site public exigé par Google : page d'accueil, [politique de confidentialité](docs/privacy.html) et [conditions d'utilisation](docs/terms.html), en français et en anglais. Pour les publier sur GitHub Pages :
+
+1. Poussez le dépôt sur GitHub (`mathgen44/MyNote`, public).
+2. Dans **Settings → Pages**, choisissez la source *Deploy from a branch*, branche `main`, dossier `/docs`. Le site est alors servi à `https://mathgen44.github.io/MyNote/`.
+3. Dans [Google Search Console](https://search.google.com/search-console), ajoutez la propriété *Préfixe de l'URL* `https://mathgen44.github.io/MyNote/`. Copiez la balise `google-site-verification` dans `docs/index.html` (à l'emplacement prévu), poussez, puis cliquez sur **Valider**.
+4. Dans Google Auth Platform, ouvrez **Branding** et renseignez :
+   - domaine autorisé : `mathgen44.github.io` ;
+   - page d'accueil : `https://mathgen44.github.io/MyNote/` ;
+   - règles de confidentialité : `https://mathgen44.github.io/MyNote/privacy.html` ;
+   - conditions d'utilisation : `https://mathgen44.github.io/MyNote/terms.html`.
+5. Dans **Audience**, cliquez sur **Publier l'application**.
+
 Le code secret d'un client « Application de bureau » n'est pas confidentiel au sens OAuth, comme l'indique Google : la sécurité repose sur PKCE et sur la redirection locale.
 
 Un utilisateur peut toujours utiliser son propre identifiant : ⚙ → Google Drive → *Avancé*. Tous ses appareils doivent alors utiliser le même identifiant, car `drive.file` limite l'accès aux fichiers créés par un même projet Google Cloud.
