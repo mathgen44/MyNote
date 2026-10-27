@@ -1,6 +1,6 @@
 # MyNote
 
-Application de prise de notes open source inspirée de OneNote, pour Windows (Tauri), avec synchronisation asynchrone sur Google Drive.
+Application de prise de notes open source organisée en carnets, sections et pages, pour Windows (Tauri), avec synchronisation asynchrone sur Google Drive.
 
 ## Fonctionnalités (v1)
 

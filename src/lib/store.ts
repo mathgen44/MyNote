@@ -39,7 +39,7 @@ export interface Page extends Base {
 }
 
 export const SECTION_COLORS = [
-  "#7719aa", "#2d7ff9", "#0f9d58", "#e8710a", "#d93025",
+  "#0e7490", "#2d7ff9", "#0f9d58", "#e8710a", "#d93025",
   "#c2185b", "#00897b", "#5f6368", "#b8860b", "#3949ab",
 ];
 

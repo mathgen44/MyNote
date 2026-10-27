@@ -1,11 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect x="32" y="32" width="448" height="448" rx="96" fill="#7719aa"/>
-  <rect x="150" y="110" width="240" height="292" rx="24" fill="#ffffff"/>
-  <rect x="122" y="150" width="56" height="20" rx="10" fill="#e8d5f2"/>
-  <rect x="122" y="246" width="56" height="20" rx="10" fill="#e8d5f2"/>
-  <rect x="122" y="342" width="56" height="20" rx="10" fill="#e8d5f2"/>
-  <rect x="210" y="170" width="140" height="18" rx="9" fill="#7719aa"/>
-  <rect x="210" y="220" width="120" height="14" rx="7" fill="#b98ad0"/>
-  <rect x="210" y="260" width="140" height="14" rx="7" fill="#b98ad0"/>
-  <rect x="210" y="300" width="96" height="14" rx="7" fill="#b98ad0"/>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#14b8a6"/>
+      <stop offset="1" stop-color="#0e7490"/>
+    </linearGradient>
+  </defs>
+  <rect x="32" y="32" width="448" height="448" rx="112" fill="url(#bg)"/>
+  <!-- feuille au coin replié -->
+  <path d="M150 104h150l70 70v222a24 24 0 0 1-24 24H150a24 24 0 0 1-24-24V128a24 24 0 0 1 24-24z" fill="#ffffff"/>
+  <path d="M300 104v52a18 18 0 0 0 18 18h52z" fill="#b6ecef"/>
+  <!-- lignes d'écriture -->
+  <rect x="168" y="214" width="150" height="16" rx="8" fill="#9adbe0"/>
+  <rect x="168" y="262" width="118" height="16" rx="8" fill="#9adbe0"/>
+  <rect x="168" y="310" width="84" height="16" rx="8" fill="#9adbe0"/>
+  <!-- crayon -->
+  <g transform="rotate(45 330 330)">
+    <rect x="306" y="214" width="48" height="150" rx="8" fill="#f59e0b"/>
+    <rect x="306" y="214" width="48" height="26" rx="8" fill="#fb7185"/>
+    <path d="M306 364h48l-24 46z" fill="#fde7c4"/>
+    <path d="M321 393h18l-9 17z" fill="#1f2937"/>
+  </g>
 </svg>
