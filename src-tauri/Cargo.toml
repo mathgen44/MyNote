@@ -1,0 +1,20 @@
+[package]
+name = "mynote"
+version = "0.1.0"
+description = "Prise de notes open source, synchronisée avec Google Drive"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rand = "0.8"
+sha2 = "0.10"
+base64 = "0.22"
+keyring = { version = "3", features = ["windows-native"] }
