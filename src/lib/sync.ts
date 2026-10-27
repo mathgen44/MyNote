@@ -1,27 +1,27 @@
-﻿// Synchronisation asynchrone avec Google Drive.
+﻿// Synchronisation asynchrone, vers Google Drive ou vers un dossier local
+// répliqué par un client tiers (Drive pour ordinateur, OneDrive, Dropbox…).
 //
-// Dossier Â« MyNote Â» Ã  la racine du Drive :
-//   workspace.yjs        arborescence (carnets / sections / pages)
-//   page-<id>.yjs        contenu de chaque page (Ã©tat Yjs complet)
-//   att-<id>             piÃ¨ces jointes (immuables)
+// Chaque appareil n'écrit QUE ses propres fichiers, ce qui supprime tout
+// conflit d'écriture (et les copies « (1) » des clients de synchro) :
+//   workspace.<appareil>.yjs     arborescence carnets / sections / pages
+//   page-<id>.<appareil>.yjs     contenu d'une page (état Yjs complet)
+//   att-<id>                     pièces jointes (immuables)
 //
-// Pour chaque document : si la version Drive a changÃ©, on la tÃ©lÃ©charge et on
-// la fusionne (CRDT, sans conflit). Puis, si l'Ã©tat local contient quelque chose
-// que Drive n'a pas (comparaison de snapshots Yjs), on tÃ©lÃ©verse l'Ã©tat fusionnÃ©.
-// Deux appareils qui s'Ã©crasent mutuellement convergent au cycle suivant.
+// Pour chaque document : on fusionne (CRDT) les fichiers des autres appareils
+// qui ont changé, puis on réécrit son propre fichier seulement si l'état local
+// contient quelque chose que les fichiers distants n'ont pas (comparaison de
+// snapshots Yjs, suppressions comprises). Un nouvel appareil qui n'a rien
+// modifié n'écrit donc rien, et une modification ne provoque pas d'écho.
 
 import { useSyncExternalStore } from "react";
 import * as Y from "yjs";
 import { createStore, del, get, keys, set } from "idb-keyval";
 import { getAttachment, listAttachmentIds, storeAttachment } from "./attachments";
-import { google } from "./platform";
+import { newId } from "./ids";
+import { folder, google, syncSettings } from "./platform";
+import type { SyncMode } from "./platform";
 import { REMOTE_ORIGIN, emitter, getPageDoc, getSnapshot, localChange, workspace, workspaceReady } from "./store";
 
-const DRIVE = "https://www.googleapis.com/drive/v3";
-const UPLOAD = "https://www.googleapis.com/upload/drive/v3";
-const FOLDER_MIME = "application/vnd.google-apps.folder";
-const ROOT_FOLDER = "MyNote";
-const PERIODIC_MS = 60_000;
 const AFTER_EDIT_MS = 5_000;
 
 interface RemoteFile {
@@ -29,19 +29,44 @@ interface RemoteFile {
   name: string;
   version: string;
 }
+
+interface Backend {
+  mode: Exclude<SyncMode, "none">;
+  /** Intervalle de vérification des changements distants. */
+  interval: number;
+  list(): Promise<RemoteFile[]>;
+  read(file: RemoteFile): Promise<Blob>;
+  write(name: string, data: Blob, existing?: RemoteFile): Promise<RemoteFile>;
+}
+
+/** Ce que l'on sait des fichiers distants d'un document. */
 interface DocMeta {
-  fileId: string;
-  version: string;
-  snapshot: Uint8Array;
+  /** Versions des fichiers des autres appareils déjà fusionnés. */
+  files: Record<string, string>;
+  /** État Yjs de l'union des fichiers distants connus. */
+  union?: Uint8Array;
+  snapshot?: Uint8Array;
+  /** Cet appareil a déjà écrit son fichier. */
+  wrote?: boolean;
 }
 
 const meta = createStore("mynote-sync", "meta");
 
-// --- Ã‰tat exposÃ© Ã  l'interface ---------------------------------------------
+async function deviceId(): Promise<string> {
+  let id = await get<string>("deviceId", meta);
+  if (!id) {
+    id = newId();
+    await set("deviceId", id, meta);
+  }
+  return id;
+}
+
+// --- État exposé à l'interface ---------------------------------------------
 
 export type SyncState = "disconnected" | "idle" | "syncing" | "offline" | "error";
 export interface SyncStatus {
   state: SyncState;
+  mode?: SyncMode;
   lastSync?: number;
   message?: string;
 }
@@ -53,7 +78,12 @@ function setStatus(next: SyncStatus) {
 }
 export const useSyncStatus = () => useSyncExternalStore(statusChange.on, () => status);
 
-// --- Appels Drive ------------------------------------------------------------
+// --- Google Drive (API REST v3) -----------------------------------------------
+
+const DRIVE = "https://www.googleapis.com/drive/v3";
+const UPLOAD = "https://www.googleapis.com/upload/drive/v3";
+const FOLDER_MIME = "application/vnd.google-apps.folder";
+const ROOT_FOLDER = "MyNote";
 
 class HttpError extends Error {
   constructor(public status: number, message: string) {
@@ -74,7 +104,7 @@ async function request(url: string, init: RequestInit = {}): Promise<Response> {
 
 const q = (s: string) => s.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 
-async function ensureFolder(): Promise<string> {
+async function ensureDriveFolder(): Promise<string> {
   const known = await get<string>("folderId", meta);
   if (known) {
     try {
@@ -99,93 +129,138 @@ async function ensureFolder(): Promise<string> {
   return id;
 }
 
-async function listFolder(folderId: string): Promise<Map<string, RemoteFile>> {
-  const files = new Map<string, RemoteFile>();
-  let pageToken = "";
-  do {
-    const query = encodeURIComponent(`'${folderId}' in parents and trashed=false`);
-    const res = await request(
-      `${DRIVE}/files?q=${query}&pageSize=1000&fields=nextPageToken,files(id,name,version)${pageToken ? `&pageToken=${pageToken}` : ""}`,
-    );
-    const body = await res.json();
-    for (const f of body.files ?? []) {
-      // En cas de doublon (deux appareils ont crÃ©Ã© le mÃªme fichier), on garde le premier.
-      if (!files.has(f.name)) files.set(f.name, f);
-    }
-    pageToken = body.nextPageToken ?? "";
-  } while (pageToken);
-  return files;
+function driveBackend(): Backend {
+  let folderId = "";
+  return {
+    mode: "drive",
+    interval: 60_000,
+    async list() {
+      folderId = await ensureDriveFolder();
+      const files: RemoteFile[] = [];
+      let pageToken = "";
+      do {
+        const query = encodeURIComponent(`'${folderId}' in parents and trashed=false`);
+        const res = await request(
+          `${DRIVE}/files?q=${query}&pageSize=1000&fields=nextPageToken,files(id,name,version)${pageToken ? `&pageToken=${pageToken}` : ""}`,
+        );
+        const body = await res.json();
+        files.push(...(body.files ?? []));
+        pageToken = body.nextPageToken ?? "";
+      } while (pageToken);
+      return files;
+    },
+    async read(file) {
+      return (await request(`${DRIVE}/files/${file.id}?alt=media`)).blob();
+    },
+    async write(name, data, existing) {
+      if (existing) {
+        const res = await request(`${UPLOAD}/files/${existing.id}?uploadType=media&fields=id,name,version`, { method: "PATCH", body: data });
+        return res.json();
+      }
+      const boundary = "mynote" + Math.random().toString(36).slice(2);
+      const metadata = JSON.stringify({ name, parents: [folderId] });
+      const body = new Blob([
+        `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n`,
+        `--${boundary}\r\nContent-Type: ${data.type || "application/octet-stream"}\r\n\r\n`,
+        data,
+        `\r\n--${boundary}--`,
+      ]);
+      const res = await request(`${UPLOAD}/files?uploadType=multipart&fields=id,name,version`, {
+        method: "POST",
+        headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
+        body,
+      });
+      return res.json();
+    },
+  };
 }
 
-async function download(fileId: string): Promise<Blob> {
-  return (await request(`${DRIVE}/files/${fileId}?alt=media`)).blob();
-}
+// --- Dossier local ------------------------------------------------------------
 
-async function upload(folderId: string, name: string, data: Blob, existingId?: string): Promise<RemoteFile> {
-  if (existingId) {
-    const res = await request(`${UPLOAD}/files/${existingId}?uploadType=media&fields=id,name,version`, { method: "PATCH", body: data });
-    return res.json();
-  }
-  const boundary = "mynote" + Math.random().toString(36).slice(2);
-  const metadata = JSON.stringify({ name, parents: [folderId] });
-  const body = new Blob([
-    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n`,
-    `--${boundary}\r\nContent-Type: ${data.type || "application/octet-stream"}\r\n\r\n`,
-    data,
-    `\r\n--${boundary}--`,
-  ]);
-  const res = await request(`${UPLOAD}/files?uploadType=multipart&fields=id,name,version`, {
-    method: "POST",
-    headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
-    body,
-  });
-  return res.json();
+function folderBackend(): Backend {
+  return {
+    mode: "folder",
+    // Lister un dossier local ne coûte rien : on vérifie plus souvent.
+    interval: 15_000,
+    async list() {
+      return (await folder.list()).map((f) => ({ id: f.name, ...f }));
+    },
+    read: (file) => folder.read(file.name),
+    async write(name, data) {
+      const saved = await folder.write(name, data);
+      return { id: saved.name, ...saved };
+    },
+  };
 }
 
 // --- Algorithme --------------------------------------------------------------
 
-async function syncDoc(folderId: string, name: string, doc: Y.Doc, remote: RemoteFile | undefined) {
-  let m = await get<DocMeta>(`doc:${name}`, meta);
+const DOC_FILE = /^(workspace|page-[0-9a-z]+)\.([0-9a-z]+)\.yjs$/;
+const ATT_FILE = /^att-([0-9a-z]+)$/;
 
-  if (remote && (!m || m.fileId !== remote.id || m.version !== remote.version)) {
-    const bytes = new Uint8Array(await (await download(remote.id)).arrayBuffer());
+async function syncDoc(backend: Backend, me: string, key: string, doc: Y.Doc, files: RemoteFile[]) {
+  let m: DocMeta = (await get<DocMeta>(`doc:${key}`, meta)) ?? { files: {} };
+  const deviceOf = (f: RemoteFile) => DOC_FILE.exec(f.name)?.[2];
+  const mine = files.find((f) => deviceOf(f) === me);
+  const others = files.filter((f) => deviceOf(f) !== me);
+
+  // Un fichier connu a disparu (appareil retiré, nettoyage) : on reconstruit
+  // l'union, ce qui provoquera la réécriture de notre propre état complet.
+  const present = new Set(others.map((f) => f.name));
+  if (Object.keys(m.files).some((name) => !present.has(name))) m = { files: {}, wrote: m.wrote };
+
+  let union: Y.Doc | undefined;
+  for (const file of others) {
+    if (m.files[file.name] === file.version) continue;
+    const bytes = new Uint8Array(await (await backend.read(file)).arrayBuffer());
     Y.applyUpdate(doc, bytes, REMOTE_ORIGIN);
-    const remoteDoc = new Y.Doc();
-    Y.applyUpdate(remoteDoc, bytes);
-    m = { fileId: remote.id, version: remote.version, snapshot: Y.encodeSnapshot(Y.snapshot(remoteDoc)) };
-    remoteDoc.destroy();
-    await set(`doc:${name}`, m, meta);
+    if (!union) {
+      union = new Y.Doc();
+      if (m.union) Y.applyUpdate(union, m.union);
+    }
+    Y.applyUpdate(union, bytes);
+    m.files[file.name] = file.version;
+  }
+  if (union) {
+    m.union = Y.encodeStateAsUpdate(union);
+    m.snapshot = Y.encodeSnapshot(Y.snapshot(union));
+    union.destroy();
   }
 
-  const upToDate = remote && m && m.fileId === remote.id && Y.equalSnapshots(Y.snapshot(doc), Y.decodeSnapshot(m.snapshot));
-  if (upToDate) return;
-
-  // Ã‰tat et snapshot capturÃ©s au mÃªme instant : une frappe pendant l'envoi
-  // sera simplement dÃ©tectÃ©e au cycle suivant.
-  const state = Y.encodeStateAsUpdate(doc);
-  const snapshot = Y.encodeSnapshot(Y.snapshot(doc));
-  const saved = await upload(folderId, name, new Blob([state as Uint8Array<ArrayBuffer>], { type: "application/octet-stream" }), remote?.id);
-  await set(`doc:${name}`, { fileId: saved.id, version: saved.version, snapshot }, meta);
+  const known = m.snapshot ? Y.decodeSnapshot(m.snapshot) : undefined;
+  const hasNews = !known || !Y.equalSnapshots(Y.snapshot(doc), known);
+  if (hasNews || (m.wrote && !mine)) {
+    // État et snapshot capturés au même instant : une frappe pendant l'envoi
+    // sera simplement détectée au cycle suivant.
+    const state = Y.encodeStateAsUpdate(doc);
+    const snapshot = Y.encodeSnapshot(Y.snapshot(doc));
+    await backend.write(`${key}.${me}.yjs`, new Blob([state as Uint8Array<ArrayBuffer>], { type: "application/octet-stream" }), mine);
+    m.union = state;
+    m.snapshot = snapshot;
+    m.wrote = true;
+  }
+  await set(`doc:${key}`, m, meta);
 }
 
-async function syncAttachments(folderId: string, files: Map<string, RemoteFile>) {
+async function syncAttachments(backend: Backend, remote: Map<string, RemoteFile>) {
   const local = new Set(await listAttachmentIds());
   for (const id of local) {
-    if (files.has(`att-${id}`)) continue;
+    if (remote.has(id)) continue;
     const blob = await getAttachment(id);
-    if (blob) await upload(folderId, `att-${id}`, blob);
+    if (blob) await backend.write(`att-${id}`, blob);
   }
-  for (const [name, file] of files) {
-    if (!name.startsWith("att-")) continue;
-    const id = name.slice(4);
-    if (!local.has(id)) await storeAttachment(id, await download(file.id));
+  for (const [id, file] of remote) {
+    if (!local.has(id)) await storeAttachment(id, await backend.read(file));
   }
 }
 
+let backend: Backend | null = null;
 let running = false;
 let rerun = false;
 
 export async function syncNow(): Promise<void> {
+  const current = backend;
+  if (!current) return;
   if (running) {
     rerun = true;
     return;
@@ -194,30 +269,36 @@ export async function syncNow(): Promise<void> {
   setStatus({ ...status, state: "syncing", message: undefined });
   try {
     await workspaceReady;
-    const folderId = await ensureFolder();
-    const files = await listFolder(folderId);
+    const me = await deviceId();
+    const docs = new Map<string, RemoteFile[]>();
+    const attachments = new Map<string, RemoteFile>();
+    for (const file of await current.list()) {
+      const doc = DOC_FILE.exec(file.name);
+      if (doc) docs.set(doc[1], [...(docs.get(doc[1]) ?? []), file]);
+      const att = ATT_FILE.exec(file.name);
+      if (att) attachments.set(att[1], file);
+    }
 
-    // L'arborescence d'abord : elle fait apparaÃ®tre les pages crÃ©Ã©es ailleurs.
-    await syncDoc(folderId, "workspace.yjs", workspace, files.get("workspace.yjs"));
+    // L'arborescence d'abord : elle fait apparaître les pages créées ailleurs.
+    await syncDoc(current, me, "workspace", workspace, docs.get("workspace") ?? []);
 
     const pageIds = new Set(getSnapshot().allPageIds);
-    for (const name of files.keys()) {
-      const match = /^page-(.+)\.yjs$/.exec(name);
-      if (match) pageIds.add(match[1]);
-    }
+    for (const key of docs.keys()) if (key.startsWith("page-")) pageIds.add(key.slice(5));
     for (const id of pageIds) {
       const entry = getPageDoc(id);
       await entry.ready;
-      await syncDoc(folderId, `page-${id}.yjs`, entry.doc, files.get(`page-${id}.yjs`));
+      await syncDoc(current, me, `page-${id}`, entry.doc, docs.get(`page-${id}`) ?? []);
     }
 
-    await syncAttachments(folderId, files);
-    setStatus({ state: "idle", lastSync: Date.now() });
+    await syncAttachments(current, attachments);
+    if (backend === current) setStatus({ state: "idle", mode: current.mode, lastSync: Date.now() });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
+    if (backend !== current) return;
     if (message === "NOT_CONNECTED") setStatus({ state: "disconnected" });
-    else if (message === "SESSION_EXPIRED") setStatus({ state: "error", message: "Session Google expirÃ©e : reconnectez-vous dans les paramÃ¨tres." });
-    else if (!navigator.onLine || e instanceof TypeError) setStatus({ ...status, state: "offline", message: "Hors ligne â€” synchronisation diffÃ©rÃ©e" });
+    else if (message === "SESSION_EXPIRED") setStatus({ ...status, state: "error", message: "Session Google expirée : reconnectez-vous dans les paramètres." });
+    else if (current.mode === "drive" && (!navigator.onLine || e instanceof TypeError))
+      setStatus({ ...status, state: "offline", message: "Hors ligne — synchronisation différée" });
     else setStatus({ ...status, state: "error", message });
   } finally {
     running = false;
@@ -230,31 +311,44 @@ export async function syncNow(): Promise<void> {
 
 let timer = 0;
 export function scheduleSync(delay = AFTER_EDIT_MS) {
-  if (status.state === "disconnected") return;
+  if (!backend) return;
   window.clearTimeout(timer);
   timer = window.setTimeout(() => void syncNow(), delay);
 }
 
-let started = false;
-/** DÃ©marre la synchro automatique si un compte Google est connectÃ©. */
+let interval = 0;
+let listening = false;
+
+/** (Re)démarre la synchro automatique selon le mode choisi dans les paramètres. */
 export async function startSync() {
-  const s = await google.status().catch(() => ({ configured: false, connected: false }));
-  if (!s.connected) {
+  const settings = await syncSettings.get().catch(() => ({ mode: "none" as SyncMode, folder: null }));
+  backend = null;
+  if (settings.mode === "drive") {
+    const g = await google.status().catch(() => ({ connected: false }));
+    if (g.connected) backend = driveBackend();
+  } else if (settings.mode === "folder" && settings.folder) {
+    backend = folderBackend();
+  }
+
+  window.clearInterval(interval);
+  if (!backend) {
     setStatus({ state: "disconnected" });
     return;
   }
-  setStatus({ state: "idle" });
+  setStatus({ state: "idle", mode: backend.mode });
+  interval = window.setInterval(() => void syncNow(), backend.interval);
   void syncNow();
-  if (started) return;
-  started = true;
+  if (listening) return;
+  listening = true;
   localChange.on(() => scheduleSync());
-  window.setInterval(() => status.state !== "disconnected" && void syncNow(), PERIODIC_MS);
   window.addEventListener("online", () => scheduleSync(500));
 }
 
-/** Oublie l'Ã©tat de synchro local (aprÃ¨s dÃ©connexion ou changement de compte). */
+/** Oublie l'état de synchro (changement de mode ou de compte). L'identifiant d'appareil est conservé. */
 export async function resetSyncState() {
+  backend = null;
   window.clearTimeout(timer);
-  for (const k of await keys(meta)) await del(k, meta);
+  window.clearInterval(interval);
+  for (const k of await keys(meta)) if (k !== "deviceId") await del(k, meta);
   setStatus({ state: "disconnected" });
 }

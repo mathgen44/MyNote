@@ -1,19 +1,32 @@
 import { useEffect, useState } from "react";
-import { google } from "../lib/platform";
-import type { GoogleStatus } from "../lib/platform";
+import { folder, google, syncSettings } from "../lib/platform";
+import type { GoogleStatus, SyncMode, SyncSettings } from "../lib/platform";
 import { resetSyncState, startSync, syncNow, useSyncStatus } from "../lib/sync";
 
 const timeFmt = new Intl.DateTimeFormat("fr-FR", { timeStyle: "medium" });
 
+const MODES: { mode: SyncMode; title: string; description: string }[] = [
+  { mode: "drive", title: "Google Drive", description: "Recommandé. Connexion en un clic, aucun logiciel à installer." },
+  { mode: "folder", title: "Dossier synchronisé", description: "Sans compte dans MyNote : Google Drive pour ordinateur, OneDrive, Dropbox…" },
+  { mode: "none", title: "Aucune", description: "Les notes restent uniquement sur cet ordinateur." },
+];
+
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const sync = useSyncStatus();
-  const [status, setStatus] = useState<GoogleStatus>({ configured: false, connected: false });
+  const [settings, setSettings] = useState<SyncSettings>({ mode: "none" });
+  const [view, setView] = useState<SyncMode>();
+  const [gStatus, setGStatus] = useState<GoogleStatus>({ configured: false, connected: false, builtin: false });
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
 
-  const refresh = async () => setStatus(await google.status());
+  const refresh = async () => {
+    const [s, g] = await Promise.all([syncSettings.get(), google.status()]);
+    setSettings(s);
+    setGStatus(g);
+    setView((v) => v ?? s.mode);
+  };
 
   useEffect(() => {
     void refresh();
@@ -36,76 +49,155 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     }
   };
 
+  /** Change de mode : l'état de synchro précédent est oublié, les notes locales restent. */
+  const activate = async (mode: SyncMode) => {
+    await resetSyncState();
+    await syncSettings.setMode(mode);
+    await startSync();
+  };
+
+  const status = (
+    <p className="hint">
+      État : {labelFor(sync.state)}
+      {sync.lastSync && ` — dernière synchro à ${timeFmt.format(sync.lastSync)}`}
+      {sync.message && (
+        <>
+          <br />
+          {sync.message}
+        </>
+      )}
+    </p>
+  );
+
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div className="modal settings" onMouseDown={(e) => e.stopPropagation()}>
-        <h3>Synchronisation Google Drive</h3>
+        <h3>Synchronisation</h3>
 
-        <section>
-          <h4>1. Identifiants OAuth</h4>
-          <p className="hint">
-            Créez un projet sur <b>console.cloud.google.com</b>, activez l'<b>API Google Drive</b>, configurez l'écran de
-            consentement (périmètre <code>drive.file</code>, statut <b>En production</b>), puis créez un identifiant OAuth de type
-            <b> Application de bureau</b>. Le détail est dans le README.
-          </p>
-          <label>
-            ID client
-            <input value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="xxxx.apps.googleusercontent.com" />
-          </label>
-          <label>
-            Code secret du client
-            <input value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} type="password" />
-          </label>
-          <button disabled={busy || !clientId.trim()} onClick={() => run(() => google.setConfig({ clientId, clientSecret }))}>
-            Enregistrer
-          </button>
-        </section>
+        <div className="mode-list">
+          {MODES.map((m) => (
+            <label key={m.mode} className={"mode-option" + (view === m.mode ? " selected" : "")}>
+              <input type="radio" name="mode" checked={view === m.mode} onChange={() => setView(m.mode)} />
+              <span>
+                <b>{m.title}</b>
+                {settings.mode === m.mode && <span className="badge">actif</span>}
+                <br />
+                <span className="hint">{m.description}</span>
+              </span>
+            </label>
+          ))}
+        </div>
 
-        <section>
-          <h4>2. Compte Google</h4>
-          {status.connected ? (
-            <>
-              <p>
-                ✅ Connecté — dossier <b>MyNote</b> dans votre Drive.
-              </p>
-              <div className="row">
-                <button className="primary" disabled={busy || sync.state === "syncing"} onClick={() => run(syncNow)}>
-                  Synchroniser maintenant
-                </button>
+        {view === "drive" && (
+          <section>
+            {gStatus.connected && settings.mode === "drive" ? (
+              <>
+                <p>
+                  ✅ Connecté — dossier <b>MyNote</b> à la racine de votre Drive.
+                </p>
+                <div className="row">
+                  <button className="primary" disabled={busy || sync.state === "syncing"} onClick={() => run(syncNow)}>
+                    Synchroniser maintenant
+                  </button>
+                  <button
+                    className="danger"
+                    disabled={busy}
+                    onClick={() =>
+                      run(async () => {
+                        await google.logout();
+                        await activate("none");
+                      })
+                    }
+                  >
+                    Se déconnecter
+                  </button>
+                </div>
+                {status}
+              </>
+            ) : (
+              <>
                 <button
-                  className="danger"
-                  disabled={busy}
+                  className="primary"
+                  disabled={busy || !gStatus.configured}
                   onClick={() =>
                     run(async () => {
-                      await google.logout();
-                      await resetSyncState();
+                      if (!gStatus.connected) await google.login();
+                      await activate("drive");
                     })
                   }
                 >
-                  Se déconnecter
+                  {busy ? "Connexion dans le navigateur…" : gStatus.connected ? "Activer la synchro Google Drive" : "Se connecter à Google"}
                 </button>
-              </div>
-            </>
-          ) : (
-            <button
-              className="primary"
-              disabled={busy || !status.configured}
-              onClick={() =>
-                run(async () => {
-                  await google.login();
-                  await startSync();
-                })
-              }
-            >
-              {busy ? "Connexion dans le navigateur…" : "Se connecter à Google"}
+                {!gStatus.configured && (
+                  <p className="hint">Cette version de MyNote n'inclut pas d'identifiant Google : renseignez le vôtre ci-dessous.</p>
+                )}
+              </>
+            )}
+
+            <details open={!gStatus.configured}>
+              <summary>Avancé : utiliser mon propre identifiant OAuth</summary>
+              <p className="hint">
+                Facultatif{gStatus.builtin ? " : l'identifiant intégré suffit" : ""}. Projet Google Cloud avec l'API Drive activée et un
+                identifiant OAuth de type <b>Application de bureau</b> (voir README). Laissez vide pour revenir à l'identifiant intégré.
+              </p>
+              <label>
+                ID client
+                <input value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="xxxx.apps.googleusercontent.com" />
+              </label>
+              <label>
+                Code secret du client
+                <input value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} type="password" />
+              </label>
+              <button disabled={busy} onClick={() => run(() => google.setConfig({ clientId, clientSecret }))}>
+                Enregistrer
+              </button>
+            </details>
+          </section>
+        )}
+
+        {view === "folder" && (
+          <section>
+            <p className="hint">
+              Choisissez un dossier répliqué par votre logiciel de synchronisation, par exemple <code>G:\Mon Drive</code> avec Google Drive
+              pour ordinateur. Un sous-dossier <b>MyNote</b> y sera créé. Choisissez le même dossier sur chaque PC.
+            </p>
+            {settings.mode === "folder" && settings.folder && (
+              <p>
+                📁 <code>{settings.folder}</code>
+              </p>
+            )}
+            <div className="row">
+              <button
+                className="primary"
+                disabled={busy}
+                onClick={() =>
+                  run(async () => {
+                    if (!(await folder.pick())) return;
+                    await resetSyncState();
+                    await startSync();
+                  })
+                }
+              >
+                {settings.mode === "folder" ? "Changer de dossier…" : "Choisir un dossier…"}
+              </button>
+              {settings.mode === "folder" && (
+                <button disabled={busy || sync.state === "syncing"} onClick={() => run(syncNow)}>
+                  Synchroniser maintenant
+                </button>
+              )}
+            </div>
+            {settings.mode === "folder" && status}
+          </section>
+        )}
+
+        {view === "none" && settings.mode !== "none" && (
+          <section>
+            <button className="danger" disabled={busy} onClick={() => run(() => activate("none"))}>
+              Désactiver la synchronisation
             </button>
-          )}
-          <p className="hint">
-            État : {labelFor(sync.state)}
-            {sync.lastSync && ` — dernière synchro à ${timeFmt.format(sync.lastSync)}`}
-            {sync.message && <><br />{sync.message}</>}
-          </p>
-        </section>
+            <p className="hint">Les notes déjà présentes sur cet ordinateur sont conservées.</p>
+          </section>
+        )}
 
         {error && <p className="error">{error}</p>}
         <div className="modal-actions">
@@ -119,7 +211,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
 export function labelFor(state: string) {
   return (
     {
-      disconnected: "non connecté",
+      disconnected: "non synchronisé",
       idle: "à jour",
       syncing: "synchronisation…",
       offline: "hors ligne",

@@ -10,7 +10,9 @@ Application de prise de notes open source inspirée de OneNote, pour Windows (Ta
 - **Glisser-déposer** de pages (réordonner, ou déposer sur une autre section pour la déplacer)
 - **Recherche plein texte hors ligne** (`Ctrl+E`) dans les titres et le contenu
 - **Hors ligne d'abord** : tout est enregistré localement (IndexedDB) ; la synchro Drive est un plus
-- **Synchronisation Google Drive** : en arrière-plan, 5 s après une modification et toutes les 60 s, avec fusion automatique sans conflit (CRDT Yjs)
+- **Synchronisation** en arrière-plan, avec fusion automatique sans conflit (CRDT Yjs), au choix :
+  - **Google Drive** : connexion en un clic
+  - **Dossier synchronisé** : n'importe quel dossier répliqué par Google Drive pour ordinateur, OneDrive, Dropbox, Syncthing…
 - **Export** HTML (images intégrées), Markdown, impression / PDF
 - Thème clair / sombre automatique
 - Raccourcis : `Ctrl+N` nouvelle page, `Ctrl+E` recherche, `Ctrl+Z` / `Ctrl+Y`, `Ctrl+clic` pour ouvrir un lien
@@ -30,40 +32,68 @@ Pour produire l'exécutable et les installateurs (`src-tauri/target/release/bund
 npm run tauri build
 ```
 
-## Configurer Google Drive
+Test du moteur de synchronisation (plusieurs appareils simulés en mémoire) :
 
-Comme le projet est open source, chacun utilise son propre identifiant OAuth Google (gratuit) :
+```bash
+npm run test:sync
+```
 
-1. Sur [console.cloud.google.com](https://console.cloud.google.com), créez un projet.
+## Synchronisation
+
+Dans MyNote : ⚙ → choisir le mode.
+
+### Google Drive (mode principal)
+
+Pour l'utilisateur : **Se connecter à Google**, c'est tout. Le navigateur s'ouvre, on autorise MyNote, et un dossier `MyNote` apparaît à la racine du Drive. Le jeton de renouvellement est stocké dans le **Gestionnaire d'identifiants Windows**.
+
+MyNote n'utilise que le périmètre `drive.file` : l'application ne voit **que les fichiers qu'elle a créés**, jamais le reste du Drive.
+
+#### Identifiant OAuth intégré (à faire une fois par le mainteneur)
+
+L'identifiant OAuth Google est intégré à l'exécutable au moment de la compilation :
+
+1. Sur [console.cloud.google.com](https://console.cloud.google.com), créez un projet « MyNote ».
 2. **API et services → Bibliothèque** : activez **Google Drive API**.
-3. **Écran de consentement OAuth** : type *Externe*, ajoutez le champ d'application `.../auth/drive.file`, puis **publiez l'application (En production)**.
-   - En mode *Test*, Google invalide la connexion tous les 7 jours.
-   - `drive.file` est un périmètre non sensible : pas d'audit de sécurité. Google affichera seulement un avertissement « application non validée » lors de la première connexion (*Paramètres avancés → Accéder à MyNote*).
-4. **Identifiants → Créer → ID client OAuth → Application de bureau**.
-5. Dans MyNote : ⚙ → collez l'ID client et le code secret → **Enregistrer** → **Se connecter à Google**.
+3. **Écran de consentement OAuth** (Google Auth Platform) : type *Externe*, nom « MyNote », e-mail d'assistance ; champ d'application `https://www.googleapis.com/auth/drive.file` ; puis **Publier l'application** (statut *En production*).
+   - En mode *Test*, les connexions expirent au bout de 7 jours et seuls les testeurs déclarés peuvent se connecter.
+   - `drive.file` est un périmètre non sensible : **pas d'audit de sécurité**. La vérification de la marque (nom et logo affichés à l'écran de consentement) est recommandée ; elle demande une page d'accueil et une politique de confidentialité, par exemple sur GitHub Pages.
+4. **Identifiants → Créer des identifiants → ID client OAuth → Application de bureau**, puis **Télécharger le JSON**.
+5. Enregistrez ce fichier sous `src-tauri/google-oauth.json`. Il est ignoré par git. Vous pouvez aussi définir les variables d'environnement `MYNOTE_GOOGLE_CLIENT_ID` et `MYNOTE_GOOGLE_CLIENT_SECRET`.
+6. `npm run tauri build` : l'identifiant est intégré à l'exécutable.
 
-Le code secret d'un client « Application de bureau » n'est pas réellement secret (Google le sait), la sécurité repose sur PKCE. Le jeton de renouvellement est stocké dans le **Gestionnaire d'identifiants Windows**.
+Le code secret d'un client « Application de bureau » n'est pas confidentiel au sens OAuth, comme l'indique Google : la sécurité repose sur PKCE et sur la redirection locale.
 
-Sur un second PC, utilisez le **même** identifiant OAuth : avec `drive.file`, l'application ne voit que les fichiers créés par son propre projet Google Cloud.
+Un utilisateur peut toujours utiliser son propre identifiant : ⚙ → Google Drive → *Avancé*. Tous ses appareils doivent alors utiliser le même identifiant, car `drive.file` limite l'accès aux fichiers créés par un même projet Google Cloud.
 
-## Fonctionnement de la synchronisation
+### Dossier synchronisé (alternative locale)
 
-Un dossier `MyNote` est créé à la racine du Drive :
+MyNote écrit dans un dossier choisi, par exemple `G:\Mon Drive`, où il crée un sous-dossier `MyNote`. Un logiciel tiers se charge de la réplication : Google Drive pour ordinateur, OneDrive, Dropbox, Syncthing ou Nextcloud. Il n'y a aucun compte à connecter dans MyNote. Il suffit de choisir le même dossier sur chaque PC.
+
+### Fonctionnement
+
+Le format est identique dans les deux modes. **Chaque appareil n'écrit que ses propres fichiers**, il n'y a donc jamais de conflit d'écriture ni de copie « (1) » :
 
 | Fichier | Contenu |
 |---|---|
-| `workspace.yjs` | arborescence carnets / sections / pages |
-| `page-<id>.yjs` | contenu d'une page (état Yjs) |
+| `workspace.<appareil>.yjs` | arborescence carnets / sections / pages |
+| `page-<id>.<appareil>.yjs` | contenu d'une page (état Yjs) |
 | `att-<id>` | pièces jointes (immuables) |
 
-À chaque cycle, pour chaque document : si la version Drive a changé, elle est téléchargée et **fusionnée** (CRDT). Si l'état local contient des modifications absentes de Drive (comparaison de snapshots Yjs, suppressions comprises), l'état fusionné est téléversé. Deux appareils modifiant la même page hors ligne convergent sans perte.
+À chaque cycle, l'application procède en deux temps :
+
+1. Elle fusionne les fichiers des autres appareils qui ont changé (CRDT : rien ne se perd, même avec des modifications hors ligne des deux côtés).
+2. Elle réécrit son propre fichier, mais seulement si l'état local contient quelque chose d'absent des fichiers distants. La comparaison se fait par snapshots Yjs et tient compte des suppressions.
+
+Conséquences : un nouvel appareil n'écrit rien tant qu'il ne modifie rien, et une modification ne provoque pas d'écho chez les autres appareils.
+
+La synchronisation a lieu 5 s après une modification, puis toutes les 60 s en mode Drive et toutes les 15 s en mode dossier.
 
 ## Architecture
 
 ```
 src/
   lib/store.ts        modèle Yjs (workspace + une doc par page), persistance IndexedDB
-  lib/sync.ts         moteur de synchro Google Drive (API REST v3)
+  lib/sync.ts         moteur de synchro (Google Drive API v3 ou dossier local)
   lib/search.ts       index plein texte (MiniSearch)
   lib/attachments.ts  pièces jointes (Blob IndexedDB)
   lib/extensions.ts   extensions TipTap (images locales, fichiers)
@@ -71,7 +101,10 @@ src/
   components/         interface React
 src-tauri/src/
   google.rs           OAuth 2.0 bureau : serveur loopback + PKCE + keyring
+  folder.rs           réglages de synchro, mode dossier (lecture / écriture atomique)
   files.rs            « Enregistrer sous » natif
+src-tauri/build.rs    intègre l'identifiant OAuth (google-oauth.json)
+tests/sync/           simulation multi-appareils du moteur de synchro
 ```
 
 ## Limites connues / pistes v2

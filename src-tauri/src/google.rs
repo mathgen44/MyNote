@@ -42,6 +42,8 @@ pub struct GoogleState {
 pub struct GoogleStatus {
     configured: bool,
     connected: bool,
+    /// Un identifiant OAuth est intégré à cette version de MyNote.
+    builtin: bool,
 }
 
 #[derive(Deserialize)]
@@ -57,10 +59,21 @@ fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join("google.json"))
 }
 
-fn load_config(app: &AppHandle) -> Option<GoogleConfig> {
+/// Identifiant saisi par l'utilisateur (réglage avancé).
+fn custom_config(app: &AppHandle) -> Option<GoogleConfig> {
     let raw = std::fs::read_to_string(config_path(app).ok()?).ok()?;
     let cfg: GoogleConfig = serde_json::from_str(&raw).ok()?;
     (!cfg.client_id.is_empty()).then_some(cfg)
+}
+
+/// Identifiant intégré à la compilation (voir build.rs).
+fn builtin_config() -> Option<GoogleConfig> {
+    let client_id = option_env!("MYNOTE_GOOGLE_CLIENT_ID").filter(|id| !id.is_empty())?;
+    Some(GoogleConfig { client_id: client_id.into(), client_secret: option_env!("MYNOTE_GOOGLE_CLIENT_SECRET").unwrap_or_default().into() })
+}
+
+fn load_config(app: &AppHandle) -> Option<GoogleConfig> {
+    custom_config(app).or_else(builtin_config)
 }
 
 fn keyring_entry() -> Result<keyring::Entry, String> {
@@ -155,12 +168,13 @@ pub fn google_status(app: AppHandle) -> GoogleStatus {
     GoogleStatus {
         configured: load_config(&app).is_some(),
         connected: stored_refresh_token().is_some(),
+        builtin: builtin_config().is_some(),
     }
 }
 
 #[tauri::command]
 pub fn google_get_config(app: AppHandle) -> GoogleConfig {
-    load_config(&app).unwrap_or_default()
+    custom_config(&app).unwrap_or_default()
 }
 
 #[tauri::command]
@@ -171,8 +185,14 @@ pub fn google_set_config(
     client_secret: String,
 ) -> Result<(), String> {
     let cfg = GoogleConfig { client_id: client_id.trim().into(), client_secret: client_secret.trim().into() };
-    let json = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
-    std::fs::write(config_path(&app)?, json).map_err(|e| e.to_string())?;
+    let path = config_path(&app)?;
+    if cfg.client_id.is_empty() {
+        // Champ vidé : retour à l'identifiant intégré.
+        let _ = std::fs::remove_file(path);
+    } else {
+        let json = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
+        std::fs::write(path, json).map_err(|e| e.to_string())?;
+    }
     *state.access.lock().unwrap() = None;
     Ok(())
 }

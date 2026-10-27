@@ -204,6 +204,17 @@ code { background: var(--bg-hover); border-radius: 4px; padding: 1px 4px; font-s
 .settings section { border-top: 1px solid var(--border); padding-top: 10px; display: flex; flex-direction: column; gap: 8px; }
 .settings h4 { margin: 0; }
 .settings label { display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
+.settings details { display: flex; flex-direction: column; gap: 8px; }
+.settings details > * + * { margin-top: 8px; }
+.settings summary { cursor: pointer; color: var(--text-muted); font-size: 13px; }
+.mode-list { display: flex; flex-direction: column; gap: 6px; }
+.settings .mode-option {
+  flex-direction: row; align-items: flex-start; gap: 10px; padding: 8px 12px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 8px; font-size: 14px;
+}
+.settings .mode-option.selected { border-color: var(--accent); background: var(--accent-soft); }
+.modal .mode-option input { width: auto; flex: none; margin-top: 4px; accent-color: var(--accent); }
+.badge { margin-left: 8px; font-size: 11px; background: var(--accent); color: #fff; border-radius: 999px; padding: 1px 8px; }
 
 .context-menu {
   position: fixed; z-index: 60; min-width: 200px; background: var(--bg); border: 1px solid var(--border);

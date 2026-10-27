@@ -102,7 +102,9 @@ export default function App() {
         />
         <button className={`sync-pill ${sync.state}`} title={sync.message ?? "Paramètres de synchronisation"} onClick={() => setSettingsOpen(true)}>
           <span className="dot" />
-          {sync.state === "disconnected" ? "Drive non connecté" : labelFor(sync.state)}
+          {sync.state === "disconnected"
+            ? "Synchro désactivée"
+            : `${sync.mode === "folder" ? "Dossier" : "Drive"} · ${labelFor(sync.state)}`}
         </button>
         <button className="icon-button" title="Paramètres" onClick={() => setSettingsOpen(true)}>
           ⚙
@@ -117,9 +119,9 @@ export default function App() {
             <button className="primary" onClick={firstNotebook}>
               Créer mon premier carnet
             </button>
-            <button onClick={() => setSettingsOpen(true)}>Connecter Google Drive</button>
+            <button onClick={() => setSettingsOpen(true)}>Configurer la synchronisation</button>
           </div>
-          <p className="hint">Vous avez déjà des notes sur Drive ? Connectez-vous : elles apparaîtront ici.</p>
+          <p className="hint">Vous avez déjà des notes synchronisées ? Activez la synchronisation : elles apparaîtront ici.</p>
         </div>
       ) : (
         <div className="columns">
