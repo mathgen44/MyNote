@@ -2,14 +2,24 @@
 
 Application de prise de notes open source organisée en carnets, sections et pages, pour Windows (Tauri), avec synchronisation asynchrone sur Google Drive.
 
-## Fonctionnalités (v1)
+**[Télécharger](https://github.com/mathgen44/MyNote/releases/latest)** · **[Site](https://mathgen44.github.io/MyNote/)** · [Confidentialité](https://mathgen44.github.io/MyNote/privacy.html) · [Conditions d'utilisation](https://mathgen44.github.io/MyNote/terms.html)
+
+## Installation
+
+1. Téléchargez `MyNote_x.y.z_x64-setup.exe` depuis la [dernière version](https://github.com/mathgen44/MyNote/releases/latest) et lancez-le. Le `.msi` sert aux déploiements en entreprise.
+2. L'installateur n'est pas signé : si Windows SmartScreen affiche « Windows a protégé votre ordinateur », cliquez sur **Informations complémentaires** puis **Exécuter quand même**.
+3. Pour synchroniser vos notes entre plusieurs PC : ⚙ → **Google Drive** → **Se connecter à Google**. Pas d'autre réglage.
+
+Une nouvelle version s'installe par-dessus l'ancienne. Les notes et la connexion Google sont conservées.
+
+## Fonctionnalités
 
 - **Carnets → sections → pages** avec sous-pages (deux niveaux de retrait), couleurs et menus contextuels (clic droit)
 - **Éditeur riche** : titres, gras/italique/souligné/barré, surlignage multicolore, listes, **listes de tâches**, citations, code, tableaux, liens, séparateurs
 - **Images et pièces jointes** : coller, glisser-déposer ou bouton 📎. Les grandes images sont réduites automatiquement
 - **Glisser-déposer** de pages (réordonner, ou déposer sur une autre section pour la déplacer)
 - **Recherche plein texte hors ligne** (`Ctrl+E`) dans les titres et le contenu
-- **Hors ligne d'abord** : tout est enregistré localement (IndexedDB) ; la synchro Drive est un plus
+- **Hors ligne d'abord** : tout est enregistré localement (IndexedDB) ; la synchronisation est un plus
 - **Synchronisation** en arrière-plan, avec fusion automatique sans conflit (CRDT Yjs), au choix :
   - **Google Drive** : connexion en un clic
   - **Dossier synchronisé** : n'importe quel dossier répliqué par Google Drive pour ordinateur, OneDrive, Dropbox, Syncthing…
@@ -17,73 +27,68 @@ Application de prise de notes open source organisée en carnets, sections et pag
 - Thème clair / sombre automatique
 - Raccourcis : `Ctrl+N` nouvelle page, `Ctrl+E` recherche, `Ctrl+Z` / `Ctrl+Y`, `Ctrl+clic` pour ouvrir un lien
 
-## Développement
+## Connexion à Google Drive : comment ça marche
 
-Prérequis : Node 20+, Rust stable, WebView2 (inclus dans Windows 11).
+L'utilisateur n'a **rien à configurer** : l'identifiant OAuth de MyNote est intégré à l'exécutable. Il ne crée donc ni projet Google Cloud ni identifiant. Un clic sur « Se connecter à Google » déclenche le flux OAuth 2.0 prévu par Google pour les [applications de bureau](https://developers.google.com/identity/protocols/oauth2/native-app) :
 
-```bash
-npm install
-npm run tauri dev
+```
+MyNote (Rust)                          Navigateur                       Google
+─────────────                          ──────────                       ──────
+1. ouvre un serveur local
+   http://127.0.0.1:<port aléatoire>
+2. génère un secret PKCE (S256)
+3. ouvre le navigateur par défaut ───▶ page de connexion Google ─────▶ l'utilisateur autorise
+                                        « MyNote » (drive.file)
+4. reçoit le code d'autorisation  ◀─── redirection vers 127.0.0.1 ◀──
+5. échange code + secret PKCE ──────────────────────────────────────▶ jeton d'accès (1 h)
+                                                                       + jeton de renouvellement
+6. range le jeton de renouvellement
+   dans le Gestionnaire d'identifiants Windows
 ```
 
-Pour produire l'exécutable et les installateurs (`src-tauri/target/release/bundle/`) :
+- **Navigateur système, pas de fenêtre intégrée** : l'utilisateur se connecte dans son navigateur habituel, avec ses mots de passe et sa double authentification. MyNote ne voit jamais le mot de passe Google.
+- **PKCE + redirection locale** : seul le processus MyNote qui a lancé la connexion peut récupérer le code. C'est cela qui sécurise le flux. Le « code secret » d'un client de type *Application de bureau* n'est pas confidentiel, Google le précise lui-même, et peut donc être intégré à l'exécutable.
+- **Accès minimal `drive.file`** : MyNote ne voit **que les fichiers qu'il a créés** (le dossier `MyNote` à la racine du Drive), jamais le reste. Ce périmètre « non sensible » ne demande pas d'audit de sécurité Google.
+- **Jetons** : le jeton d'accès reste en mémoire et se renouvelle automatiquement. Le jeton de renouvellement est conservé dans le Gestionnaire d'identifiants Windows, jamais dans un fichier. **Se déconnecter** le révoque auprès de Google et l'efface.
+- **Appels Drive** : l'interface appelle directement l'API REST Google Drive v3. MyNote n'a pas de serveur.
 
-```bash
-npm run tauri build
-```
+Un utilisateur peut aussi utiliser **son propre identifiant OAuth** : ⚙ → Google Drive → *Avancé*. Tous ses appareils doivent alors utiliser le même, car `drive.file` limite l'accès aux fichiers créés par un même projet Google Cloud.
 
-Test du moteur de synchronisation (plusieurs appareils simulés en mémoire) :
+### Mettre en place l'identifiant intégré (mainteneur, une seule fois)
 
-```bash
-npm run test:sync
-```
+1. Sur [console.cloud.google.com](https://console.cloud.google.com), créez un projet et activez **Google Drive API** (API et services → Bibliothèque).
+2. **Google Auth Platform** : type *Externe*. Sous *Accès aux données*, ajoutez `https://www.googleapis.com/auth/drive.file`.
+3. **Identifiants → Créer des identifiants → ID client OAuth → Application de bureau**, puis **Télécharger le JSON**.
+4. Enregistrez ce fichier sous `src-tauri/google-oauth.json` (ignoré par git), ou définissez `MYNOTE_GOOGLE_CLIENT_ID` et `MYNOTE_GOOGLE_CLIENT_SECRET`. `src-tauri/build.rs` les intègre à l'exécutable à la compilation.
+5. `npm run tauri build`.
 
-## Synchronisation
+Tant que l'application est en mode **Test** (Google Auth Platform → *Audience*), seuls les **utilisateurs test** déclarés peuvent se connecter, et leur connexion expire au bout de 7 jours.
 
-Dans MyNote : ⚙ → choisir le mode.
+### Publier l'application auprès de Google (passage en production)
 
-### Google Drive (mode principal)
+Google exige trois pages publiques sur un domaine dont vous prouvez la propriété. Elles se trouvent dans [`docs/`](docs/) et sont publiées par GitHub Pages (*Settings → Pages*, branche `main`, dossier `/docs`) :
 
-Pour l'utilisateur : **Se connecter à Google**, c'est tout. Le navigateur s'ouvre, on autorise MyNote, et un dossier `MyNote` apparaît à la racine du Drive. Le jeton de renouvellement est stocké dans le **Gestionnaire d'identifiants Windows**.
+| Page | Adresse |
+|---|---|
+| Accueil | https://mathgen44.github.io/MyNote/ |
+| Confidentialité | https://mathgen44.github.io/MyNote/privacy.html |
+| Conditions d'utilisation | https://mathgen44.github.io/MyNote/terms.html |
 
-MyNote n'utilise que le périmètre `drive.file` : l'application ne voit **que les fichiers qu'elle a créés**, jamais le reste du Drive.
+Étapes, avec les pièges rencontrés :
 
-#### Identifiant OAuth intégré (à faire une fois par le mainteneur)
-
-L'identifiant OAuth Google est intégré à l'exécutable au moment de la compilation :
-
-1. Sur [console.cloud.google.com](https://console.cloud.google.com), créez un projet « MyNote ».
-2. **API et services → Bibliothèque** : activez **Google Drive API**.
-3. **Écran de consentement OAuth** (Google Auth Platform) : type *Externe*, nom « MyNote », e-mail d'assistance ; champ d'application `https://www.googleapis.com/auth/drive.file` ; puis **Publier l'application** (statut *En production*).
-   - En mode *Test*, les connexions expirent au bout de 7 jours et seuls les testeurs déclarés peuvent se connecter.
-   - `drive.file` est un périmètre non sensible : **pas d'audit de sécurité**. La vérification de la marque (nom et logo affichés à l'écran de consentement) est recommandée ; elle demande une page d'accueil et une politique de confidentialité, par exemple sur GitHub Pages.
-4. **Identifiants → Créer des identifiants → ID client OAuth → Application de bureau**, puis **Télécharger le JSON**.
-5. Enregistrez ce fichier sous `src-tauri/google-oauth.json`. Il est ignoré par git. Vous pouvez aussi définir les variables d'environnement `MYNOTE_GOOGLE_CLIENT_ID` et `MYNOTE_GOOGLE_CLIENT_SECRET`.
-6. `npm run tauri build` : l'identifiant est intégré à l'exécutable.
-
-#### Pages exigées par Google pour la publication
-
-Le dossier [`docs/`](docs/) contient le site public exigé par Google : page d'accueil, [politique de confidentialité](docs/privacy.html) et [conditions d'utilisation](docs/terms.html), en français et en anglais. Pour les publier sur GitHub Pages :
-
-1. Poussez le dépôt sur GitHub (`mathgen44/MyNote`, public).
-2. Dans **Settings → Pages**, choisissez la source *Deploy from a branch*, branche `main`, dossier `/docs`. Le site est alors servi à `https://mathgen44.github.io/MyNote/`.
-3. Dans [Google Search Console](https://search.google.com/search-console), ajoutez la propriété *Préfixe de l'URL* `https://mathgen44.github.io/MyNote/`. Copiez la balise `google-site-verification` dans `docs/index.html` (à l'emplacement prévu), poussez, puis cliquez sur **Valider**.
-4. Dans Google Auth Platform, ouvrez **Branding** et renseignez :
+1. **Prouver la propriété du domaine entier**, pas seulement du sous-dossier. Le domaine autorisé est `mathgen44.github.io` : il faut donc un site à la racine. C'est le dépôt [`mathgen44.github.io`](https://github.com/mathgen44/mathgen44.github.io), qui porte la balise de vérification. Dans [Search Console](https://search.google.com/search-console), ajoutez la propriété `https://mathgen44.github.io/` (méthode « Balise HTML ») **avec le même compte Google** que le projet Cloud.
+2. **Google Auth Platform → Branding** :
    - domaine autorisé : `mathgen44.github.io` ;
-   - page d'accueil : `https://mathgen44.github.io/MyNote/` ;
-   - règles de confidentialité : `https://mathgen44.github.io/MyNote/privacy.html` ;
-   - conditions d'utilisation : `https://mathgen44.github.io/MyNote/terms.html`.
-5. Dans **Audience**, cliquez sur **Publier l'application**.
+   - page d'accueil : l'adresse **exacte**, sans ancre (pas de `#en`) ;
+   - liens de confidentialité et de conditions d'utilisation.
+3. **Logo** : facultatif. Google refuse un logo qui ressemble à une autre marque : l'ancienne icône, un carnet violet, a été refusée. En cas de doute, ne mettez pas de logo.
+4. **Audience → Publier l'application**. Après une modification de la vérification, Google demande d'attendre 24 h avant de revalider.
 
-Le code secret d'un client « Application de bureau » n'est pas confidentiel au sens OAuth, comme l'indique Google : la sécurité repose sur PKCE et sur la redirection locale.
+## Dossier synchronisé (alternative sans compte)
 
-Un utilisateur peut toujours utiliser son propre identifiant : ⚙ → Google Drive → *Avancé*. Tous ses appareils doivent alors utiliser le même identifiant, car `drive.file` limite l'accès aux fichiers créés par un même projet Google Cloud.
+MyNote écrit dans un dossier choisi, par exemple `G:\Mon Drive`, où il crée un sous-dossier `MyNote`. Un logiciel tiers se charge de la réplication : Google Drive pour ordinateur, OneDrive, Dropbox, Syncthing ou Nextcloud. Aucun compte n'est connecté dans MyNote. Il suffit de choisir le même dossier sur chaque PC.
 
-### Dossier synchronisé (alternative locale)
-
-MyNote écrit dans un dossier choisi, par exemple `G:\Mon Drive`, où il crée un sous-dossier `MyNote`. Un logiciel tiers se charge de la réplication : Google Drive pour ordinateur, OneDrive, Dropbox, Syncthing ou Nextcloud. Il n'y a aucun compte à connecter dans MyNote. Il suffit de choisir le même dossier sur chaque PC.
-
-### Fonctionnement
+## Fonctionnement de la synchronisation
 
 Le format est identique dans les deux modes. **Chaque appareil n'écrit que ses propres fichiers**, il n'y a donc jamais de conflit d'écriture ni de copie « (1) » :
 
@@ -102,7 +107,28 @@ Conséquences : un nouvel appareil n'écrit rien tant qu'il ne modifie rien, et 
 
 La synchronisation a lieu 5 s après une modification, puis toutes les 60 s en mode Drive et toutes les 15 s en mode dossier.
 
-## Architecture
+## Développement
+
+Prérequis : Node 20+, Rust stable, WebView2 (inclus dans Windows 11).
+
+```bash
+npm install
+npm run tauri dev
+```
+
+Exécutable et installateurs (`src-tauri/target/release/bundle/`) :
+
+```bash
+npm run tauri build
+```
+
+Test du moteur de synchronisation (plusieurs appareils simulés en mémoire) :
+
+```bash
+npm run test:sync
+```
+
+### Architecture
 
 ```
 src/
@@ -118,13 +144,14 @@ src-tauri/src/
   folder.rs           réglages de synchro, mode dossier (lecture / écriture atomique)
   files.rs            « Enregistrer sous » natif
 src-tauri/build.rs    intègre l'identifiant OAuth (google-oauth.json)
+docs/                 site public (GitHub Pages)
 tests/sync/           simulation multi-appareils du moteur de synchro
 ```
 
-## Limites connues / pistes v2
+## Limites connues / pistes
 
 - Pas encore de corbeille visible (les suppressions sont logiques et synchronisées)
-- Pas de canvas libre façon OneNote (éditeur en flux)
+- Pas de canvas libre façon OneNote (éditeur en flux) : prévu pour la prochaine version
 - Pas d'écriture au stylet, d'OCR, d'audio ni d'import OneNote (API Microsoft Graph)
 - Le fichier d'une page sur Drive n'est pas lisible directement (format binaire Yjs) : utiliser l'export
 - PWA : il faudra un mini-backend pour les jetons Google (une application web pure n'obtient pas de jeton de renouvellement)
