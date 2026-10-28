@@ -1,6 +1,6 @@
 [package]
 name = "mynote"
-version = "0.1.0"
+version = "0.2.0"
 description = "Prise de notes open source, synchronisée avec Google Drive"
 edition = "2021"
 
